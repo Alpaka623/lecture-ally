@@ -1,5 +1,5 @@
 {
-  "name": "ai-professor",
+  "name": "lecture-ally",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,7 +9,11 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@google/genai": "^2.11.0",
+    "@napi-rs/canvas": "^1.0.2",
+    "msedge-tts": "^2.0.7",
     "next": "16.2.10",
+    "pdfjs-dist": "^6.1.200",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
