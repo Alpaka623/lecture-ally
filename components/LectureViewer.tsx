@@ -1,97 +1,87 @@
 "use client";
 
-import type { Language } from "@/lib/data/deckStore";
+import { useEffect, useRef, useState } from "react";
 import { useLecture } from "@/hooks/useLecture";
-import { SlideImage } from "./SlideImage";
-import { CaptionPanel, STATUS_LABEL } from "./CaptionPanel";
-import { PlaybackControls } from "./PlaybackControls";
-import { AskQuestionPanel } from "./AskQuestionPanel";
-import { QnaTranscript } from "./QnaTranscript";
+import { LecturePlayer } from "./LecturePlayer";
+import { ChatPanel } from "./ChatPanel";
 
 export function LectureViewer({
   deckId,
   slideCount,
-  language,
 }: {
   deckId: string;
   slideCount: number;
-  language: Language;
 }) {
-  const lecture = useLecture(deckId, slideCount, language);
-  const isLoading = lecture.narrationState === "loading";
+  const lecture = useLecture(deckId, slideCount);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [question, setQuestion] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [focusNonce, setFocusNonce] = useState(0);
+
+  const openChat = () => {
+    setChatOpen(true);
+    setFocusNonce((n) => n + 1);
+  };
+
+  // Focus the ask field once the (mobile) drawer has mounted / full screen has
+  // exited. The nested rAF waits one paint so the layout after a full-screen
+  // change has settled and the field is focusable.
+  useEffect(() => {
+    if (focusNonce === 0) return;
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => textareaRef.current?.focus());
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+    };
+  }, [focusNonce]);
+
+  const chatProps = {
+    qna: lecture.qnaHistory,
+    question,
+    setQuestion,
+    onSubmit: lecture.submitQuestion,
+    narrationState: lecture.narrationState,
+    textareaRef,
+  };
 
   return (
-    <div className="flex flex-1 flex-col gap-4">
-      <div className="flex flex-1 flex-col rounded-lg border border-border bg-panel">
-        {isLoading && (
-          <div className="h-0.5 w-full overflow-hidden bg-border">
-            <div className="h-full w-1/3 animate-pulse bg-accent" />
-          </div>
-        )}
-
-        <div className="flex items-center justify-between border-b border-border px-6 py-3">
-          <span className="label-mono flex items-center gap-2 text-xs text-accent">
-            {isLoading && (
-              <span className="h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-            )}
-            {STATUS_LABEL[lecture.narrationState]}
-          </span>
-          <span className="label-mono text-xs text-text-muted">
-            {String(lecture.slideNumber).padStart(2, "0")} / {String(slideCount).padStart(2, "0")}
-          </span>
-        </div>
-
-        <CaptionPanel scriptText={lecture.scriptText} narrationState={lecture.narrationState} />
-
-        <div className="relative flex flex-1 items-center justify-center px-10 py-4 sm:px-14">
-          <button
-            type="button"
-            onClick={lecture.goPrev}
-            disabled={!lecture.canGoPrev}
-            aria-label="Previous slide"
-            className="absolute left-2 flex h-9 w-9 items-center justify-center rounded-full text-xl text-text-muted transition-colors hover:text-accent disabled:opacity-20 sm:left-4"
-          >
-            ‹
-          </button>
-
-          <SlideImage deckId={deckId} slideNumber={lecture.slideNumber} />
-
-          {isLoading && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded bg-bg/85 backdrop-blur-sm">
-              <span className="h-8 w-8 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-              <p className="label-mono text-xs text-accent">
-                The professor is preparing the explanation…
-              </p>
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={lecture.goNext}
-            disabled={!lecture.canGoNext}
-            aria-label="Next slide"
-            className="absolute right-2 flex h-9 w-9 items-center justify-center rounded-full text-xl text-text-muted transition-colors hover:text-accent disabled:opacity-20 sm:right-4"
-          >
-            ›
-          </button>
-        </div>
-      </div>
-
-      <PlaybackControls
-        slideIndex={lecture.slideIndex}
+    <div className="flex h-full min-h-0 flex-col gap-3 lg:flex-row">
+      <LecturePlayer
+        deckId={deckId}
+        slideNumber={lecture.slideNumber}
         slideCount={slideCount}
+        canGoPrev={lecture.canGoPrev}
+        canGoNext={lecture.canGoNext}
+        goPrev={lecture.goPrev}
+        goNext={lecture.goNext}
         narrationState={lecture.narrationState}
+        scriptText={lecture.scriptText}
+        audioTime={lecture.audioTime}
+        audioDuration={lecture.audioDuration}
+        volume={lecture.volume}
+        seekTo={lecture.seekTo}
+        setVolume={lecture.setVolume}
         onTogglePlayPause={lecture.togglePlayPause}
-        onAsk={lecture.openAsk}
+        onOpenChat={openChat}
       />
 
-      <AskQuestionPanel
-        isOpen={lecture.isAskOpen}
-        onClose={lecture.closeAsk}
-        onSubmit={lecture.submitQuestion}
-      />
+      {/* Desktop live-chat sidebar — always visible, scrolls internally */}
+      <aside className="hidden min-h-0 w-[360px] shrink-0 overflow-hidden rounded-xl border border-border bg-panel lg:block">
+        <ChatPanel {...chatProps} />
+      </aside>
 
-      <QnaTranscript qna={lecture.qnaHistory} />
+      {/* Mobile drawer — toggled from the player's Ask button */}
+      {chatOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setChatOpen(false)} />
+          <div className="absolute right-0 top-0 flex h-full w-[88%] max-w-[380px] flex-col border-l border-border bg-panel shadow-2xl">
+            <ChatPanel {...chatProps} onClose={() => setChatOpen(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

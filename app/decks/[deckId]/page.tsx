@@ -17,8 +17,8 @@ export default async function DeckPage({
   }
 
   return (
-    <>
-      <header className="flex items-center justify-between border-b border-border px-6 py-3">
+    <div className="flex h-dvh flex-col overflow-hidden">
+      <header className="flex shrink-0 items-center justify-between border-b border-border px-6 py-3">
         <div className="flex items-center gap-4">
           <Logo />
           <span className="label-mono hidden text-xs text-text-muted sm:inline">
@@ -35,9 +35,9 @@ export default async function DeckPage({
         </div>
       </header>
 
-      <main className="mx-auto flex w-full max-w-[1800px] flex-1 flex-col px-4 py-4 sm:px-6">
-        <LectureViewer deckId={deck.id} slideCount={deck.slideCount} language={deck.language} />
+      <main className="mx-auto flex min-h-0 w-full max-w-[1800px] flex-1 flex-col px-4 py-4 sm:px-6">
+        <LectureViewer deckId={deck.id} slideCount={deck.slideCount} />
       </main>
-    </>
+    </div>
   );
 }

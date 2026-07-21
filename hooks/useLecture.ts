@@ -1,30 +1,62 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Language, QnaEntry } from "@/lib/data/deckStore";
+import type { QnaEntry } from "@/lib/data/deckStore";
 
 export type NarrationState =
   | "idle"
   | "loading"
   | "narrating"
   | "paused"
-  | "asking"
   | "answering"
   | "error";
 
-export function useLecture(deckId: string, slideCount: number, language: Language) {
+export function useLecture(deckId: string, slideCount: number) {
   const [slideIndex, setSlideIndex] = useState(0);
   const [narrationState, setNarrationState] = useState<NarrationState>("loading");
   const [scriptText, setScriptText] = useState("");
   const [qnaHistory, setQnaHistory] = useState<QnaEntry[]>([]);
-  const [isAskOpen, setIsAskOpen] = useState(false);
+  const [audioTime, setAudioTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
 
-  // The main slide narration and the Q&A cue/answer are two independent audio
-  // tracks: asking a question pauses (not stops) the main track so it can be
-  // resumed later, while the Q&A track is transient and replaced each time.
+  // The main slide narration and the Q&A answer are two independent audio
+  // tracks. Sending a question *stops* the main track so the professor goes
+  // quiet while the answer plays; pressing play afterwards reloads it from
+  // cache. The Q&A track is transient and replaced on every question.
   const mainAudioRef = useRef<HTMLAudioElement | null>(null);
   const qnaAudioRef = useRef<HTMLAudioElement | null>(null);
   const loadTokenRef = useRef(0);
+
+  // Volume is read lazily from localStorage on first client render (SSR has no
+  // `window` and falls back to 1). A ref mirror lets async audio-creation
+  // callbacks read the current level without a stale closure.
+  const [volume, setVolumeState] = useState(() => {
+    if (typeof window === "undefined") return 1;
+    try {
+      const raw = localStorage.getItem("la-volume");
+      if (raw !== null) {
+        const parsed = Number(raw);
+        if (Number.isFinite(parsed)) return Math.min(Math.max(parsed, 0), 1);
+      }
+    } catch {
+      /* ignore unavailable storage */
+    }
+    return 1;
+  });
+  const volumeRef = useRef(volume);
+
+  const setVolume = useCallback((value: number) => {
+    const clamped = Math.min(Math.max(value, 0), 1);
+    volumeRef.current = clamped;
+    setVolumeState(clamped);
+    try {
+      localStorage.setItem("la-volume", String(clamped));
+    } catch {
+      /* ignore */
+    }
+    if (mainAudioRef.current) mainAudioRef.current.volume = clamped;
+    if (qnaAudioRef.current) qnaAudioRef.current.volume = clamped;
+  }, []);
 
   const slideNumber = slideIndex + 1;
 
@@ -36,8 +68,9 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
     setRenderedSlideNumber(slideNumber);
     setNarrationState("loading");
     setScriptText("");
-    setIsAskOpen(false);
     setQnaHistory([]);
+    setAudioTime(0);
+    setAudioDuration(0);
   }
 
   const stopMainAudio = useCallback(() => {
@@ -47,6 +80,8 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
       audio.pause();
       audio.src = "";
       mainAudioRef.current = null;
+      setAudioTime(0);
+      setAudioDuration(0);
     }
   }, []);
 
@@ -59,6 +94,68 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
       qnaAudioRef.current = null;
     }
   }, []);
+
+  // (Re)load the slide's explanation audio and start it from the top. Shared by
+  // the slide-change effect and the "resume after a question" path in
+  // togglePlayPause, because submitting a question stops (not pauses) the main
+  // track — the professor stops talking so the answer can be heard.
+  const loadAndPlayMain = useCallback(
+    (token: number, audioUrl: string) => {
+      const audio = new Audio(audioUrl);
+      audio.volume = volumeRef.current;
+      mainAudioRef.current = audio;
+
+      audio.addEventListener("timeupdate", () => {
+        if (token !== loadTokenRef.current) return;
+        // Values above the sentinel are the duration-fix seek below, not
+        // real progress.
+        if (audio.currentTime > 1e9) return;
+        setAudioTime(audio.currentTime);
+      });
+      audio.onended = () => {
+        if (token !== loadTokenRef.current) return;
+        if (Number.isFinite(audio.duration)) setAudioTime(audio.duration);
+        setNarrationState("paused");
+      };
+
+      const startPlayback = () => {
+        if (token !== loadTokenRef.current) return;
+        audio.play().catch(() => {});
+      };
+
+      // The WebM files produced by the TTS service carry no duration
+      // metadata, so browsers report `Infinity` — which breaks both the
+      // seek bar and seeking itself. One seek to an absurd timestamp
+      // forces the real duration to be computed before playback starts.
+      const ensureDurationAndPlay = () => {
+        if (Number.isFinite(audio.duration) && audio.duration > 0) {
+          setAudioDuration(audio.duration);
+          startPlayback();
+          return;
+        }
+        const resolveDuration = () => {
+          audio.removeEventListener("timeupdate", resolveDuration);
+          if (token !== loadTokenRef.current) return;
+          if (Number.isFinite(audio.duration) && audio.duration > 0) {
+            setAudioDuration(audio.duration);
+          }
+          audio.currentTime = 0;
+          startPlayback();
+        };
+        audio.addEventListener("timeupdate", resolveDuration);
+        audio.currentTime = Number.MAX_SAFE_INTEGER;
+      };
+
+      if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        ensureDurationAndPlay();
+      } else {
+        audio.addEventListener("loadedmetadata", ensureDurationAndPlay, { once: true });
+      }
+
+      setNarrationState("narrating");
+    },
+    [volumeRef],
+  );
 
   useEffect(() => {
     loadTokenRef.current += 1;
@@ -101,14 +198,7 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
       .then((data) => {
         if (token !== loadTokenRef.current) return;
         setScriptText(data.script);
-        const audio = new Audio(data.audioUrl);
-        mainAudioRef.current = audio;
-        audio.onended = () => {
-          if (token !== loadTokenRef.current) return;
-          setNarrationState("paused");
-        };
-        audio.play().catch(() => {});
-        setNarrationState("narrating");
+        loadAndPlayMain(token, data.audioUrl);
       })
       .catch((err) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -132,7 +222,30 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deckId, slideNumber]);
+  }, [deckId, slideNumber, loadAndPlayMain]);
+
+  // `timeupdate` only fires ~4 times a second, which makes the seek bar
+  // stutter; while the narration runs, read the position every frame.
+  useEffect(() => {
+    if (narrationState !== "narrating") return;
+    const audio = mainAudioRef.current;
+    if (!audio) return;
+    let frame = 0;
+    const tick = () => {
+      if (audio.currentTime <= 1e9) setAudioTime(audio.currentTime);
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [narrationState]);
+
+  const seekTo = useCallback((time: number) => {
+    const audio = mainAudioRef.current;
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    const target = Math.min(Math.max(time, 0), audio.duration);
+    audio.currentTime = target;
+    setAudioTime(target);
+  }, []);
 
   const goNext = useCallback(() => {
     stopMainAudio();
@@ -146,24 +259,22 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
     setSlideIndex((i) => Math.max(i - 1, 0));
   }, [stopMainAudio, stopQnaAudio]);
 
-  // Play/Pause controls only the main narration. If a question is in
-  // progress (the "Ja?" cue or an answer is playing), pressing it aborts
-  // that and resumes the main narration instead.
+  // Play/Pause controls only the main narration. If an answer is still playing,
+  // pressing it aborts that answer and (re)starts the main narration — the main
+  // track was stopped when the question was sent, so resuming reloads it.
   const togglePlayPause = useCallback(() => {
-    if (narrationState === "asking" || narrationState === "answering") {
+    if (narrationState === "answering") {
       stopQnaAudio();
-      setIsAskOpen(false);
-      const audio = mainAudioRef.current;
-      if (audio) {
-        if (audio.ended) audio.currentTime = 0;
-        audio.play().catch(() => {});
-      }
-      setNarrationState("narrating");
+      loadAndPlayMain(loadTokenRef.current, `/api/decks/${deckId}/slides/${slideNumber}/audio`);
       return;
     }
 
     const audio = mainAudioRef.current;
-    if (!audio) return;
+    if (!audio) {
+      // Stopped after a question: reload from cache (no Gemini call).
+      loadAndPlayMain(loadTokenRef.current, `/api/decks/${deckId}/slides/${slideNumber}/audio`);
+      return;
+    }
 
     if (audio.paused) {
       if (audio.ended) audio.currentTime = 0;
@@ -173,39 +284,22 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
       audio.pause();
       setNarrationState("paused");
     }
-  }, [narrationState, stopQnaAudio]);
-
-  // Asking a question always interrupts whatever is currently playing (the
-  // main narration, or an earlier "Ja?"/answer if one was already running)
-  // and plays a short "Ja?" acknowledgement while the input opens.
-  const openAsk = useCallback(() => {
-    const token = loadTokenRef.current;
-    mainAudioRef.current?.pause();
-    stopQnaAudio();
-
-    const audio = new Audio(`/api/prompts/ja?lang=${language}`);
-    qnaAudioRef.current = audio;
-    audio.play().catch(() => {});
-    audio.onended = () => {
-      if (token !== loadTokenRef.current) return;
-    };
-
-    setNarrationState("asking");
-    setIsAskOpen(true);
-  }, [language, stopQnaAudio]);
-
-  const closeAsk = useCallback(() => {
-    stopQnaAudio();
-    setIsAskOpen(false);
-    setNarrationState("paused");
-  }, [stopQnaAudio]);
+  }, [narrationState, stopQnaAudio, loadAndPlayMain, deckId, slideNumber]);
 
   const submitQuestion = useCallback(
     async (question: string) => {
-      const token = loadTokenRef.current;
       stopQnaAudio();
-      setIsAskOpen(false);
+      // Silence the professor immediately so the answer isn't talked over.
+      stopMainAudio();
       setNarrationState("answering");
+
+      // Optimistic, WhatsApp-style: the question shows up at once and the
+      // professor's slot shows a typing indicator until the answer lands.
+      const tempId = `pending-${crypto.randomUUID()}`;
+      setQnaHistory((prev) => [
+        ...prev,
+        { id: tempId, question, answer: "", askedAt: new Date().toISOString(), pending: true },
+      ]);
 
       try {
         const res = await fetch(`/api/decks/${deckId}/slides/${slideNumber}/ask`, {
@@ -218,26 +312,35 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
           throw new Error(body.error ?? "Failed to generate answer");
         }
         const data: { qnaId: string; answer: string; audioUrl: string } = await res.json();
-        if (token !== loadTokenRef.current) return;
 
-        setQnaHistory((prev) => [
-          ...prev,
-          { id: data.qnaId, question, answer: data.answer, askedAt: new Date().toISOString() },
-        ]);
+        setQnaHistory((prev) =>
+          prev.map((entry) =>
+            entry.id === tempId
+              ? {
+                  id: data.qnaId,
+                  question,
+                  answer: data.answer,
+                  askedAt: entry.askedAt,
+                }
+              : entry,
+          ),
+        );
 
         const audio = new Audio(data.audioUrl);
+        audio.volume = volumeRef.current;
         qnaAudioRef.current = audio;
-        audio.onended = () => {
-          if (token !== loadTokenRef.current) return;
-          setNarrationState("paused");
-        };
+        audio.onended = () => setNarrationState("paused");
         audio.play().catch(() => {});
       } catch {
-        if (token !== loadTokenRef.current) return;
+        setQnaHistory((prev) =>
+          prev.map((entry) =>
+            entry.id === tempId ? { ...entry, pending: false, failed: true } : entry,
+          ),
+        );
         setNarrationState("paused");
       }
     },
-    [deckId, slideNumber, stopQnaAudio],
+    [deckId, slideNumber, stopQnaAudio, stopMainAudio],
   );
 
   return {
@@ -246,14 +349,16 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
     narrationState,
     scriptText,
     qnaHistory,
-    isAskOpen,
+    audioTime,
+    audioDuration,
+    volume,
     canGoNext: slideIndex < slideCount - 1,
     canGoPrev: slideIndex > 0,
     goNext,
     goPrev,
     togglePlayPause,
-    openAsk,
-    closeAsk,
+    seekTo,
+    setVolume,
     submitQuestion,
   };
 }

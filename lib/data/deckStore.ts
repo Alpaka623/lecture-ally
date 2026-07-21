@@ -39,6 +39,10 @@ export interface QnaEntry {
   question: string;
   answer: string;
   askedAt: string;
+  // Client-only, never persisted: an entry the user just sent whose answer is
+  // still in flight (renders as a typing indicator) or whose request failed.
+  pending?: boolean;
+  failed?: boolean;
 }
 
 async function exists(p: string): Promise<boolean> {
