@@ -14,7 +14,7 @@ export type NarrationState =
 
 export function useLecture(deckId: string, slideCount: number, language: Language) {
   const [slideIndex, setSlideIndex] = useState(0);
-  const [narrationState, setNarrationState] = useState<NarrationState>("idle");
+  const [narrationState, setNarrationState] = useState<NarrationState>("loading");
   const [scriptText, setScriptText] = useState("");
   const [qnaHistory, setQnaHistory] = useState<QnaEntry[]>([]);
   const [isAskOpen, setIsAskOpen] = useState(false);

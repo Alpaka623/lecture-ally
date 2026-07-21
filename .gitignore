@@ -42,3 +42,8 @@ next-env.d.ts
 
 # app data (uploaded decks, generated slides/audio)
 /data
+
+# claude code / agent config, not meant for the repo
+/.claude
+/CLAUDE.md
+/AGENTS.md

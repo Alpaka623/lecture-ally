@@ -68,7 +68,21 @@ export async function writeFileAtomic(p: string, data: string | Buffer): Promise
   await ensureDir(path.dirname(p));
   const tmpPath = `${p}.${crypto.randomUUID()}.tmp`;
   await writeFile(tmpPath, data);
-  await rename(tmpPath, p);
+
+  // Windows can transiently refuse to rename over a file that another
+  // process (a concurrent reader, an AV scanner) still has open, raising
+  // EPERM/EBUSY even though nothing is actually wrong — retry briefly
+  // instead of failing the request outright.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(tmpPath, p);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if ((code !== "EPERM" && code !== "EBUSY") || attempt >= 5) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+    }
+  }
 }
 
 async function writeJson(p: string, data: unknown): Promise<void> {
