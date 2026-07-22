@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useLecture } from "@/hooks/useLecture";
+import { GEMINI_SETTINGS_CHANGED_EVENT } from "@/lib/geminiSettings";
 import { LecturePlayer } from "./LecturePlayer";
 import { ChatPanel } from "./ChatPanel";
 
@@ -22,6 +23,19 @@ export function LectureViewer({
     setChatOpen(true);
     setFocusNonce((n) => n + 1);
   };
+
+  // The slide generation failed because no API key was configured: once the
+  // user saves one in the settings dialog, retry automatically — no need to
+  // leave the slide and come back.
+  const { missingApiKey, retry } = lecture;
+  useEffect(() => {
+    const onSettingsChanged = (e: Event) => {
+      const hasKey = (e as CustomEvent<{ hasKey: boolean }>).detail?.hasKey;
+      if (hasKey && missingApiKey) retry();
+    };
+    window.addEventListener(GEMINI_SETTINGS_CHANGED_EVENT, onSettingsChanged);
+    return () => window.removeEventListener(GEMINI_SETTINGS_CHANGED_EVENT, onSettingsChanged);
+  }, [missingApiKey, retry]);
 
   // Focus the ask field once the (mobile) drawer has mounted / full screen has
   // exited. The nested rAF waits one paint so the layout after a full-screen
@@ -59,9 +73,11 @@ export function LectureViewer({
         goNext={lecture.goNext}
         narrationState={lecture.narrationState}
         scriptText={lecture.scriptText}
+        captions={lecture.captions}
         audioTime={lecture.audioTime}
         audioDuration={lecture.audioDuration}
         volume={lecture.volume}
+        missingApiKey={lecture.missingApiKey}
         seekTo={lecture.seekTo}
         setVolume={lecture.setVolume}
         onTogglePlayPause={lecture.togglePlayPause}

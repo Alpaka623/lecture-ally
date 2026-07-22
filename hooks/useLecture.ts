@@ -1,7 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { QnaEntry } from "@/lib/data/deckStore";
+import type { QnaEntry, WordTiming } from "@/lib/data/deckStore";
+import { geminiAuthHeaders, MISSING_API_KEY_CODE } from "@/lib/geminiSettings";
+
+// Error from our own API routes, carrying the machine-readable `code` so the
+// UI can distinguish "no API key configured" from generic failures.
+class ApiError extends Error {
+  code?: string;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.code = code;
+  }
+}
 
 export type NarrationState =
   | "idle"
@@ -15,9 +26,16 @@ export function useLecture(deckId: string, slideCount: number) {
   const [slideIndex, setSlideIndex] = useState(0);
   const [narrationState, setNarrationState] = useState<NarrationState>("loading");
   const [scriptText, setScriptText] = useState("");
+  // Word-level timings for karaoke-style captions, matching the slide audio.
+  const [captions, setCaptions] = useState<WordTiming[]>([]);
   const [qnaHistory, setQnaHistory] = useState<QnaEntry[]>([]);
   const [audioTime, setAudioTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
+  // True while the server reports that no API key was sent along — the player
+  // shows an "add your key" overlay instead of a plain error.
+  const [missingApiKey, setMissingApiKey] = useState(false);
+  // Bumped by retry() to re-run the slide-load effect after settings change.
+  const [reloadToken, setReloadToken] = useState(0);
 
   // The main slide narration and the Q&A answer are two independent audio
   // tracks. Sending a question *stops* the main track so the professor goes
@@ -26,6 +44,10 @@ export function useLecture(deckId: string, slideCount: number) {
   const mainAudioRef = useRef<HTMLAudioElement | null>(null);
   const qnaAudioRef = useRef<HTMLAudioElement | null>(null);
   const loadTokenRef = useRef(0);
+  // True while the main track is parked at its end to measure the duration
+  // (see loadAndPlayMain); position updates are ignored during that probe so
+  // the seek bar doesn't flash the probe position.
+  const probingRef = useRef(false);
 
   // Volume is read lazily from localStorage on first client render (SSR has no
   // `window` and falls back to 1). A ref mirror lets async audio-creation
@@ -68,9 +90,11 @@ export function useLecture(deckId: string, slideCount: number) {
     setRenderedSlideNumber(slideNumber);
     setNarrationState("loading");
     setScriptText("");
+    setCaptions([]);
     setQnaHistory([]);
     setAudioTime(0);
     setAudioDuration(0);
+    setMissingApiKey(false);
   }
 
   const stopMainAudio = useCallback(() => {
@@ -80,6 +104,7 @@ export function useLecture(deckId: string, slideCount: number) {
       audio.pause();
       audio.src = "";
       mainAudioRef.current = null;
+      probingRef.current = false;
       setAudioTime(0);
       setAudioDuration(0);
     }
@@ -104,13 +129,24 @@ export function useLecture(deckId: string, slideCount: number) {
       const audio = new Audio(audioUrl);
       audio.volume = volumeRef.current;
       mainAudioRef.current = audio;
+      probingRef.current = true;
 
       audio.addEventListener("timeupdate", () => {
-        if (token !== loadTokenRef.current) return;
-        // Values above the sentinel are the duration-fix seek below, not
-        // real progress.
+        if (token !== loadTokenRef.current || probingRef.current) return;
+        // Values above the sentinel are the duration probe below, not real
+        // progress.
         if (audio.currentTime > 1e9) return;
         setAudioTime(audio.currentTime);
+      });
+      // The TTS WebMs carry no duration metadata, so browsers can (re)discover
+      // the true length later on — once the file is fully buffered or after a
+      // seek near the end. Mirror every such discovery into the UI so the
+      // displayed duration self-heals even if the probe below came up short.
+      audio.addEventListener("durationchange", () => {
+        if (token !== loadTokenRef.current) return;
+        if (Number.isFinite(audio.duration) && audio.duration > 0) {
+          setAudioDuration(audio.duration);
+        }
       });
       audio.onended = () => {
         if (token !== loadTokenRef.current) return;
@@ -120,29 +156,46 @@ export function useLecture(deckId: string, slideCount: number) {
 
       const startPlayback = () => {
         if (token !== loadTokenRef.current) return;
+        probingRef.current = false;
         audio.play().catch(() => {});
       };
 
       // The WebM files produced by the TTS service carry no duration
       // metadata, so browsers report `Infinity` — which breaks both the
-      // seek bar and seeking itself. One seek to an absurd timestamp
-      // forces the real duration to be computed before playback starts.
+      // seek bar and seeking itself. Seeking to an absurd timestamp makes
+      // the browser fetch the tail of the file (via Range requests) and
+      // compute the real duration before playback starts. `seeked` marks
+      // the seek — and the duration recompute — as settled; if the length
+      // is still unknown afterwards, probe again: a single probe that
+      // lands while the file is still downloading would otherwise report
+      // a too-short duration and never correct itself.
       const ensureDurationAndPlay = () => {
         if (Number.isFinite(audio.duration) && audio.duration > 0) {
           setAudioDuration(audio.duration);
           startPlayback();
           return;
         }
+        let attempts = 0;
         const resolveDuration = () => {
-          audio.removeEventListener("timeupdate", resolveDuration);
+          audio.removeEventListener("seeked", resolveDuration);
           if (token !== loadTokenRef.current) return;
           if (Number.isFinite(audio.duration) && audio.duration > 0) {
             setAudioDuration(audio.duration);
+            audio.currentTime = 0;
+            startPlayback();
+            return;
           }
+          if (attempts++ < 3) {
+            audio.addEventListener("seeked", resolveDuration);
+            audio.currentTime = Number.MAX_SAFE_INTEGER;
+            return;
+          }
+          // Probing exhausted — play anyway; the duration fills in via the
+          // `durationchange` listener once the browser knows it.
           audio.currentTime = 0;
           startPlayback();
         };
-        audio.addEventListener("timeupdate", resolveDuration);
+        audio.addEventListener("seeked", resolveDuration);
         audio.currentTime = Number.MAX_SAFE_INTEGER;
       };
 
@@ -186,23 +239,33 @@ export function useLecture(deckId: string, slideCount: number) {
 
     fetch(`/api/decks/${deckId}/slides/${slideNumber}/explain`, {
       method: "POST",
+      headers: geminiAuthHeaders(),
       signal: controller.signal,
     })
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.json().catch(() => ({ error: "Unknown error" }));
-          throw new Error(body.error ?? "Failed to generate explanation");
+          throw new ApiError(body.error ?? "Failed to generate explanation", body.code);
         }
-        return res.json() as Promise<{ script: string; audioUrl: string }>;
+        return res.json() as Promise<{
+          script: string;
+          audioUrl: string;
+          captions?: WordTiming[];
+        }>;
       })
       .then((data) => {
         if (token !== loadTokenRef.current) return;
+        setMissingApiKey(false);
         setScriptText(data.script);
+        setCaptions(data.captions ?? []);
         loadAndPlayMain(token, data.audioUrl);
       })
       .catch((err) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
         if (token !== loadTokenRef.current) return;
+        if (err instanceof ApiError && err.code === MISSING_API_KEY_CODE) {
+          setMissingApiKey(true);
+        }
         setScriptText(err instanceof Error ? err.message : "Failed to generate explanation");
         setNarrationState("error");
       });
@@ -222,7 +285,7 @@ export function useLecture(deckId: string, slideCount: number) {
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deckId, slideNumber, loadAndPlayMain]);
+  }, [deckId, slideNumber, loadAndPlayMain, reloadToken]);
 
   // `timeupdate` only fires ~4 times a second, which makes the seek bar
   // stutter; while the narration runs, read the position every frame.
@@ -232,7 +295,7 @@ export function useLecture(deckId: string, slideCount: number) {
     if (!audio) return;
     let frame = 0;
     const tick = () => {
-      if (audio.currentTime <= 1e9) setAudioTime(audio.currentTime);
+      if (!probingRef.current && audio.currentTime <= 1e9) setAudioTime(audio.currentTime);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -247,17 +310,24 @@ export function useLecture(deckId: string, slideCount: number) {
     setAudioTime(target);
   }, []);
 
+  // The guards matter beyond deduplication: browser extensions can strip the
+  // `disabled` attribute from the nav buttons before hydration, making them
+  // clickable at the boundaries — without the early return, clicking them
+  // there would stop the narration without changing the slide (the index
+  // clamps to itself, so no reload happens) and leave it dead.
   const goNext = useCallback(() => {
+    if (slideIndex >= slideCount - 1) return;
     stopMainAudio();
     stopQnaAudio();
     setSlideIndex((i) => Math.min(i + 1, slideCount - 1));
-  }, [slideCount, stopMainAudio, stopQnaAudio]);
+  }, [slideIndex, slideCount, stopMainAudio, stopQnaAudio]);
 
   const goPrev = useCallback(() => {
+    if (slideIndex <= 0) return;
     stopMainAudio();
     stopQnaAudio();
     setSlideIndex((i) => Math.max(i - 1, 0));
-  }, [stopMainAudio, stopQnaAudio]);
+  }, [slideIndex, stopMainAudio, stopQnaAudio]);
 
   // Play/Pause controls only the main narration. If an answer is still playing,
   // pressing it aborts that answer and (re)starts the main narration — the main
@@ -304,12 +374,12 @@ export function useLecture(deckId: string, slideCount: number) {
       try {
         const res = await fetch(`/api/decks/${deckId}/slides/${slideNumber}/ask`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...geminiAuthHeaders() },
           body: JSON.stringify({ question }),
         });
         if (!res.ok) {
           const body = await res.json().catch(() => ({ error: "Unknown error" }));
-          throw new Error(body.error ?? "Failed to generate answer");
+          throw new ApiError(body.error ?? "Failed to generate answer", body.code);
         }
         const data: { qnaId: string; answer: string; audioUrl: string } = await res.json();
 
@@ -331,7 +401,10 @@ export function useLecture(deckId: string, slideCount: number) {
         qnaAudioRef.current = audio;
         audio.onended = () => setNarrationState("paused");
         audio.play().catch(() => {});
-      } catch {
+      } catch (err) {
+        if (err instanceof ApiError && err.code === MISSING_API_KEY_CODE) {
+          setMissingApiKey(true);
+        }
         setQnaHistory((prev) =>
           prev.map((entry) =>
             entry.id === tempId ? { ...entry, pending: false, failed: true } : entry,
@@ -343,15 +416,27 @@ export function useLecture(deckId: string, slideCount: number) {
     [deckId, slideNumber, stopQnaAudio, stopMainAudio],
   );
 
+  // Re-run the current slide's generation — used after the user adds their
+  // API key, so they don't have to leave the slide and come back.
+  const retry = useCallback(() => {
+    setMissingApiKey(false);
+    setNarrationState("loading");
+    setScriptText("");
+    setCaptions([]);
+    setReloadToken((t) => t + 1);
+  }, []);
+
   return {
     slideIndex,
     slideNumber,
     narrationState,
     scriptText,
+    captions,
     qnaHistory,
     audioTime,
     audioDuration,
     volume,
+    missingApiKey,
     canGoNext: slideIndex < slideCount - 1,
     canGoPrev: slideIndex > 0,
     goNext,
@@ -360,5 +445,6 @@ export function useLecture(deckId: string, slideCount: number) {
     seekTo,
     setVolume,
     submitQuestion,
+    retry,
   };
 }

@@ -29,9 +29,24 @@ export interface DeckMeta {
   createdAt: string;
 }
 
+export interface WordTiming {
+  /** Start offset from the beginning of the slide audio, in seconds. */
+  start: number;
+  /** Spoken duration of the word, in seconds. */
+  duration: number;
+  /** The word as reported by the TTS engine. */
+  text: string;
+}
+
 export interface SlideScript {
   text: string;
   generatedAt: string;
+  /**
+   * Word-level timings matching the cached slide audio, from the TTS engine's
+   * word-boundary metadata. Absent on slides generated before captions
+   * existed — the explain route re-synthesizes such slides once to fill it in.
+   */
+  captions?: WordTiming[];
 }
 
 export interface QnaEntry {

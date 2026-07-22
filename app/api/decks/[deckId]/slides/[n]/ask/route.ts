@@ -7,6 +7,8 @@ import {
 } from "@/lib/data/deckStore";
 import { getOrRenderSlideImage } from "@/lib/pdf/slideImage";
 import { askQuestion } from "@/lib/gemini/askQuestion";
+import { MissingApiKeyError } from "@/lib/gemini/client";
+import { MISSING_API_KEY_CODE } from "@/lib/geminiSettings";
 import { synthesizeSpeech, voiceForLanguage } from "@/lib/tts/synthesize";
 
 export const runtime = "nodejs";
@@ -43,6 +45,7 @@ export async function POST(
       slideScript: script?.text ?? "",
       question,
       language: meta.language,
+      request,
     });
 
     const qnaId = crypto.randomUUID();
@@ -61,6 +64,12 @@ export async function POST(
       audioUrl: `/api/decks/${deckId}/slides/${slideNumber}/qna/${qnaId}/audio`,
     });
   } catch (err) {
+    if (err instanceof MissingApiKeyError) {
+      return NextResponse.json(
+        { error: err.message, code: MISSING_API_KEY_CODE },
+        { status: 400 },
+      );
+    }
     console.error("Failed to answer question", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to answer question" },

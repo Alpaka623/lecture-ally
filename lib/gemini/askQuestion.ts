@@ -1,4 +1,4 @@
-import { genai, GEMINI_MODEL, LANGUAGE_LINE } from "./client";
+import { getGenAI, GEMINI_MODEL, LANGUAGE_LINE } from "./client";
 import type { Language } from "@/lib/data/deckStore";
 
 export interface AskQuestionOptions {
@@ -8,10 +8,12 @@ export interface AskQuestionOptions {
   slideScript: string;
   question: string;
   language: Language;
+  request?: Request;
 }
 
 export async function askQuestion(opts: AskQuestionOptions): Promise<string> {
   const languageLine = LANGUAGE_LINE[opts.language];
+  const genai = getGenAI(opts.request);
 
   const response = await genai.models.generateContent({
     model: GEMINI_MODEL,

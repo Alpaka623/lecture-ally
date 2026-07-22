@@ -2,14 +2,17 @@ import { listDecks } from "@/lib/data/deckStore";
 import { UploadForm } from "@/components/UploadForm";
 import { DeckList } from "@/components/DeckList";
 import { Logo } from "@/components/Logo";
+import { ApiSettingsDialog } from "@/components/ApiSettingsDialog";
+import { ApiKeyBanner } from "@/components/ApiKeyBanner";
 
 export default async function Home() {
   const decks = await listDecks();
 
   return (
     <>
-      <header className="border-b border-border px-6 py-4">
+      <header className="flex items-center justify-between border-b border-border px-6 py-4">
         <Logo />
+        <ApiSettingsDialog />
       </header>
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center gap-12 px-6 py-16">
@@ -22,6 +25,8 @@ export default async function Home() {
             guides you through the material.
           </p>
         </div>
+
+        <ApiKeyBanner />
 
         <UploadForm />
 

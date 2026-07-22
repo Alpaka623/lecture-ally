@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getDeckMeta, LANGUAGE_NAMES } from "@/lib/data/deckStore";
 import { LectureViewer } from "@/components/LectureViewer";
 import { Logo } from "@/components/Logo";
+import { ApiSettingsDialog } from "@/components/ApiSettingsDialog";
 
 export default async function DeckPage({
   params,
@@ -29,6 +30,7 @@ export default async function DeckPage({
           <span className="label-mono max-w-[220px] truncate text-xs text-text-muted">
             {deck.title}
           </span>
+          <ApiSettingsDialog />
           <Link href="/" className="label-mono text-xs text-text-muted hover:text-text">
             ✕ Exit
           </Link>

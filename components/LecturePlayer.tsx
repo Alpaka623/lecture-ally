@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState, type SVGProps } from "react";
 import type { NarrationState } from "@/hooks/useLecture";
+import type { WordTiming } from "@/lib/data/deckStore";
+import { openApiSettings } from "@/lib/geminiSettings";
 import { SlideImage } from "./SlideImage";
+import { KaraokeCaptions } from "./KaraokeCaptions";
 import { SeekBar, formatTime } from "./SeekBar";
 
 const STATUS_LABEL: Record<NarrationState, string> = {
@@ -14,7 +17,10 @@ const STATUS_LABEL: Record<NarrationState, string> = {
   error: "Error",
 };
 
-const CAPTION_STATES: NarrationState[] = ["narrating", "paused", "answering"];
+// No captions while "answering": the main track is stopped for the answer
+// audio, so its time is frozen at 0 and the script captions would show the
+// wrong words while the professor speaks the answer.
+const CAPTION_STATES: NarrationState[] = ["narrating", "paused"];
 
 function Icon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -111,9 +117,11 @@ export function LecturePlayer({
   goNext,
   narrationState,
   scriptText,
+  captions,
   audioTime,
   audioDuration,
   volume,
+  missingApiKey,
   seekTo,
   setVolume,
   onTogglePlayPause,
@@ -128,9 +136,11 @@ export function LecturePlayer({
   goNext: () => void;
   narrationState: NarrationState;
   scriptText: string;
+  captions: WordTiming[];
   audioTime: number;
   audioDuration: number;
   volume: number;
+  missingApiKey: boolean;
   seekTo: (t: number) => void;
   setVolume: (v: number) => void;
   onTogglePlayPause: () => void;
@@ -138,14 +148,17 @@ export function LecturePlayer({
 }) {
   const playerRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showCaptions, setShowCaptions] = useState(() => {
-    if (typeof window === "undefined") return true;
+  // Initialize to the server-safe default; reconcile with the stored preference
+  // after mount so server and client HTML always match during hydration.
+  const [showCaptions, setShowCaptions] = useState(true);
+
+  useEffect(() => {
     try {
-      return localStorage.getItem("la-captions") !== "0";
+      setShowCaptions(localStorage.getItem("la-captions") !== "0");
     } catch {
-      return true;
+      /* ignore */
     }
-  });
+  }, []);
 
   useEffect(() => {
     const onChange = () => setIsFullscreen(document.fullscreenElement === playerRef.current);
@@ -225,10 +238,16 @@ export function LecturePlayer({
 
       {/* Stage */}
       <div className="relative flex min-h-0 flex-1 items-center justify-center px-2 py-2">
+        {/* suppressHydrationWarning: browser extensions sometimes strip the
+            `disabled` attribute from buttons before React hydrates, which
+            trips a mismatch warning even though the server HTML is correct.
+            goPrev/goNext guard against the un-disabled click, so behavior
+            stays correct either way. */}
         <button
           type="button"
           onClick={goPrev}
           disabled={!canGoPrev}
+          suppressHydrationWarning
           aria-label="Previous slide"
           className="absolute left-2 z-10 grid h-10 w-10 place-items-center rounded-full bg-black/30 text-white/80 opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-black/55 hover:text-white enabled:group-hover:opacity-100 disabled:cursor-default"
         >
@@ -244,10 +263,44 @@ export function LecturePlayer({
           </div>
         )}
 
+        {missingApiKey && narrationState === "error" && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-[#05070a]/90 px-6 text-center backdrop-blur-sm">
+            <span aria-hidden className="text-3xl">
+              🔑
+            </span>
+            <div className="flex flex-col gap-1.5">
+              <p className="label-mono text-xs text-accent">Your Gemini API key is needed</p>
+              <p className="max-w-sm text-sm leading-relaxed text-text-muted">
+                LectureAlly ships without a built-in key, so your usage stays yours. Add your own
+                key — it is stored only in this browser.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={openApiSettings}
+              className="rounded bg-accent px-5 py-2.5 text-sm font-semibold tracking-wide text-accent-foreground transition-opacity hover:opacity-90"
+            >
+              Open API settings
+            </button>
+            <p className="text-xs text-text-faint">
+              No key yet? Get a free one at{" "}
+              <a
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-text-muted underline hover:text-text"
+              >
+                aistudio.google.com/apikey
+              </a>
+            </p>
+          </div>
+        )}
+
         <button
           type="button"
           onClick={goNext}
           disabled={!canGoNext}
+          suppressHydrationWarning
           aria-label="Next slide"
           className="absolute right-2 z-10 grid h-10 w-10 place-items-center rounded-full bg-black/30 text-white/80 opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-black/55 hover:text-white disabled:opacity-0 group-hover:opacity-100 enabled:group-hover:opacity-100"
         >
@@ -255,12 +308,17 @@ export function LecturePlayer({
         </button>
       </div>
 
-      {/* Captions overlay (CC) */}
+      {/* Captions overlay (CC): karaoke-style word-by-word when timings are
+          available, full-text fallback otherwise */}
       {showCaptionText && (
         <div className="pointer-events-none absolute inset-x-0 bottom-24 z-10 flex justify-center px-6">
-          <p className="max-w-3xl rounded-md bg-black/75 px-4 py-1.5 text-center text-base leading-snug text-white shadow-lg sm:text-lg">
-            {scriptText}
-          </p>
+          {captions.length > 0 ? (
+            <KaraokeCaptions words={captions} time={audioTime} />
+          ) : (
+            <p className="max-w-3xl rounded-md bg-black/75 px-4 py-1.5 text-center text-base leading-snug text-white shadow-lg sm:text-lg">
+              {scriptText}
+            </p>
+          )}
         </div>
       )}
 

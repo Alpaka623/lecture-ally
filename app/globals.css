@@ -56,3 +56,20 @@ body {
 .typing-dot {
   animation: typing-bounce 1.2s infinite ease-in-out;
 }
+
+/* Caption lines fade/rise in slightly when the karaoke captions advance to
+   the next line. */
+@keyframes caption-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.caption-line {
+  animation: caption-in 200ms ease-out;
+}

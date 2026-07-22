@@ -32,6 +32,11 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${anton.variable} h-full antialiased`}
+      // Browser extensions (dark-mode, translators, password managers) routinely
+      // inject classes/attributes into <html> before React hydrates, which
+      // triggers a spurious hydration warning. Suppression is one level deep —
+      // mismatches anywhere inside the tree still surface.
+      suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col bg-bg text-text font-sans">{children}</body>
     </html>

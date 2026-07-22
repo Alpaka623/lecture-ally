@@ -1,7 +1,30 @@
 import { GoogleGenAI } from "@google/genai";
 import type { Language } from "@/lib/data/deckStore";
+import { GEMINI_API_KEY_HEADER, GEMINI_BASE_URL_HEADER } from "@/lib/geminiSettings";
 
-export const genai = new GoogleGenAI({});
+export class MissingApiKeyError extends Error {
+  constructor() {
+    super("No Gemini API key configured. Open the API settings (⚙️) and add your key.");
+    this.name = "MissingApiKeyError";
+  }
+}
+
+// Builds a client per request from the key the user entered on the website
+// (kept in the browser's localStorage, sent along as a request header). There
+// is deliberately NO .env fallback — `apiKey` is always passed explicitly, so
+// the SDK never reaches for GEMINI_API_KEY/GOOGLE_API_KEY on the server.
+export function getGenAI(request?: Request): GoogleGenAI {
+  const apiKey = request?.headers.get(GEMINI_API_KEY_HEADER)?.trim();
+  if (!apiKey) {
+    throw new MissingApiKeyError();
+  }
+
+  const baseUrl = request?.headers.get(GEMINI_BASE_URL_HEADER)?.trim() || undefined;
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: baseUrl ? { baseUrl } : undefined,
+  });
+}
 
 export const GEMINI_MODEL = "gemini-3.1-flash-lite";
 

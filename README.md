@@ -16,6 +16,23 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Bring your own Gemini API key
+
+LectureAlly ships **without** a built-in API key — every user provides their own:
+
+1. Get a free key at [Google AI Studio](https://aistudio.google.com/apikey).
+2. Click the ⚙️ icon in the header, paste the key (optionally a custom base URL) and hit **Save**.
+   Use **Test connection** to check the key works before saving.
+
+Key handling:
+
+- The key is stored only in the browser (`localStorage`) and sent to the app's API routes as a
+  request header; the settings dialog is the single source of truth.
+- The server never reads `GEMINI_API_KEY`/`GOOGLE_API_KEY` from the environment and never persists
+  the key — without a browser-provided key, generation requests fail fast with a
+  `MISSING_API_KEY` error and the UI prompts to add one.
+- **Clear** in the settings dialog removes the key instantly.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

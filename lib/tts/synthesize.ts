@@ -1,9 +1,15 @@
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
-import type { Language } from "@/lib/data/deckStore";
+import type { Language, WordTiming } from "@/lib/data/deckStore";
 
 export interface TtsResult {
   audio: Buffer;
   mimeType: string;
+  /**
+   * Word-level timings reported by the TTS engine, in audio order. Empty if
+   * the service didn't emit boundary metadata (the player then falls back to
+   * showing the whole caption at once).
+   */
+  captions: WordTiming[];
 }
 
 const VOICE_BY_LANGUAGE: Record<Language, string> = {
@@ -18,18 +24,60 @@ export function voiceForLanguage(language: Language): string {
   return VOICE_BY_LANGUAGE[language];
 }
 
+// Azure/Edge speech offsets are expressed in 100-nanosecond ticks.
+const TICKS_PER_SECOND = 10_000_000;
+
+// Shape of one item in the `audio.metadata` messages emitted when
+// wordBoundaryEnabled is set: {"Metadata":[{"Type":"WordBoundary","Data":{...}}]}
+interface MetadataMessage {
+  Metadata?: Array<{
+    Type: string;
+    Data?: {
+      Offset: number;
+      Duration: number;
+      text?: { Text?: string };
+    };
+  }>;
+}
+
 export async function synthesizeSpeech(text: string, voice: string): Promise<TtsResult> {
   const tts = new MsEdgeTTS();
   try {
-    await tts.setMetadata(voice, OUTPUT_FORMAT.WEBM_24KHZ_16BIT_MONO_OPUS);
-    const { audioStream } = tts.toStream(text);
+    await tts.setMetadata(voice, OUTPUT_FORMAT.WEBM_24KHZ_16BIT_MONO_OPUS, {
+      wordBoundaryEnabled: true,
+    });
+    const { audioStream, metadataStream } = tts.toStream(text);
 
     const chunks: Buffer[] = [];
+    const captions: WordTiming[] = [];
+
+    // Boundary events ride a separate stream; each push is one complete JSON
+    // message. The service delivers every metadata message before turn.end —
+    // which is what ends the audio stream — so all events are collected by the
+    // time the audio loop below finishes. Enabling metadata does not change
+    // the audio payload itself.
+    metadataStream?.on("data", (chunk: Buffer) => {
+      try {
+        const parsed = JSON.parse(chunk.toString()) as MetadataMessage;
+        for (const item of parsed.Metadata ?? []) {
+          const data = item.Data;
+          if (item.Type !== "WordBoundary" || !data?.text?.Text) continue;
+          captions.push({
+            start: data.Offset / TICKS_PER_SECOND,
+            duration: data.Duration / TICKS_PER_SECOND,
+            text: data.text.Text,
+          });
+        }
+      } catch {
+        /* ignore malformed metadata — captions are a progressive enhancement */
+      }
+    });
+
     for await (const chunk of audioStream) {
       chunks.push(chunk as Buffer);
     }
 
-    return { audio: Buffer.concat(chunks), mimeType: "audio/webm" };
+    return { audio: Buffer.concat(chunks), mimeType: "audio/webm", captions };
   } finally {
     tts.close();
   }

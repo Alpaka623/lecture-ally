@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
 import { fileExists, slideAudioPath } from "@/lib/data/deckStore";
+import { mediaResponse } from "@/lib/http/mediaResponse";
 
 export const runtime = "nodejs";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ deckId: string; n: string }> },
 ) {
   const { deckId, n } = await params;
@@ -17,10 +18,5 @@ export async function GET(
   }
 
   const audio = await readFile(audioPath);
-  return new NextResponse(new Uint8Array(audio), {
-    headers: {
-      "Content-Type": "audio/webm",
-      "Cache-Control": "public, max-age=31536000, immutable",
-    },
-  });
+  return mediaResponse(request, new Uint8Array(audio), "audio/webm");
 }

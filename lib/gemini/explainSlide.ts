@@ -1,4 +1,4 @@
-import { genai, GEMINI_MODEL, professorSystemPrompt } from "./client";
+import { getGenAI, GEMINI_MODEL, professorSystemPrompt } from "./client";
 import type { Language } from "@/lib/data/deckStore";
 
 export interface ExplainSlideOptions {
@@ -7,9 +7,12 @@ export interface ExplainSlideOptions {
   slideCount: number;
   previousSummary?: string;
   language: Language;
+  request?: Request;
 }
 
 export async function explainSlide(opts: ExplainSlideOptions): Promise<string> {
+  const genai = getGenAI(opts.request);
+
   const response = await genai.models.generateContent({
     model: GEMINI_MODEL,
     contents: {
