@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rename, access } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, access, rm } from "node:fs/promises";
 import path from "node:path";
 
 export const DATA_ROOT = path.join(process.cwd(), "data");
@@ -108,6 +108,14 @@ async function writeJson(p: string, data: unknown): Promise<void> {
   await writeFileAtomic(p, JSON.stringify(data, null, 2));
 }
 
+/**
+ * Guards deck ids coming from the URL before they are joined into paths:
+ * rejects anything that could escape DECKS_ROOT (path separators, `..`).
+ */
+export function isValidDeckId(id: string): boolean {
+  return id.length > 0 && id !== "." && id !== ".." && !id.includes("/") && !id.includes("\\");
+}
+
 export function deckDir(deckId: string): string {
   return path.join(DECKS_ROOT, deckId);
 }
@@ -159,6 +167,25 @@ export async function addDeckToIndex(meta: DeckMeta): Promise<void> {
   const idx = (await readJson<DeckMeta[]>(idxPath)) ?? [];
   idx.unshift(meta);
   await writeJson(idxPath, idx);
+}
+
+export async function removeDeckFromIndex(deckId: string): Promise<void> {
+  const idxPath = await indexPath();
+  const idx = (await readJson<DeckMeta[]>(idxPath)) ?? [];
+  const next = idx.filter((d) => d.id !== deckId);
+  if (next.length !== idx.length) {
+    await writeJson(idxPath, next);
+  }
+}
+
+/**
+ * Deletes a deck's entire directory (PDF, slides, audio, scripts, QnA) and
+ * removes it from the index. `force: true` makes it a no-op if the directory
+ * is already gone, so a stale index entry can still be cleaned up.
+ */
+export async function deleteDeck(deckId: string): Promise<void> {
+  await rm(deckDir(deckId), { recursive: true, force: true });
+  await removeDeckFromIndex(deckId);
 }
 
 export async function getDeckMeta(deckId: string): Promise<DeckMeta | null> {
