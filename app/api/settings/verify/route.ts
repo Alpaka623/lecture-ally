@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
 
 export const runtime = "nodejs";
 
-// Lets the settings dialog prove that the entered key (and base URL) actually
-// work before the user saves — listing models authenticates without spending
+// Lets the settings dialog prove that the entered provider config actually
+// works before the user saves — listing models authenticates without spending
 // any generation tokens. The key is used for this one call and then dropped.
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const apiKey = typeof body?.apiKey === "string" ? body.apiKey.trim() : "";
-  const baseUrl = typeof body?.baseUrl === "string" ? body.baseUrl.trim() : "";
+  const baseUrlRaw = typeof body?.baseUrl === "string" ? body.baseUrl.trim() : "";
 
   if (!apiKey) {
     return NextResponse.json(
@@ -17,43 +16,69 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  if (!baseUrlRaw) {
+    return NextResponse.json(
+      { ok: false, error: "Please pick a provider (or enter a base URL) first." },
+      { status: 400 },
+    );
+  }
+
+  const baseUrl = baseUrlRaw.replace(/\/+$/, "");
 
   try {
-    const genai = new GoogleGenAI({
-      apiKey,
-      httpOptions: baseUrl ? { baseUrl } : undefined,
+    const res = await fetch(`${baseUrl}/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
     });
 
-    const pager = await genai.models.list({ config: { pageSize: 1 } });
-    let reachable = false;
-    for await (const model of pager) {
-      reachable = Boolean(model.name);
-      break;
+    if (!res.ok) {
+      throw await httpError(res);
     }
 
-    if (!reachable) {
+    const data = (await res.json()) as { data?: Array<{ id?: string }> };
+    const models = data.data ?? [];
+
+    if (models.length === 0) {
       return NextResponse.json({ ok: false, error: "The endpoint returned no models." });
     }
+
+    // Deliberately NOT matching the entered model against this list: /models
+    // is unreliable as a "does this model exist" check — endpoints paginate
+    // (Gemini's flash-lite isn't on page one) and some prefix ids with
+    // "models/", so a perfectly valid model would produce a false warning.
+    // A bad model name surfaces as a clear error on first generation instead.
     return NextResponse.json({ ok: true });
   } catch (err) {
-    return NextResponse.json({ ok: false, error: humanizeError(err) });
+    return NextResponse.json({
+      ok: false,
+      error: err instanceof Error ? err.message : "Connection failed.",
+    });
   }
 }
 
-// The SDK surfaces Google's error payload as a raw JSON string — extract the
-// readable message (e.g. "API key not valid…") so the dialog can show it.
-function humanizeError(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err);
-  try {
-    const jsonStart = raw.indexOf("{");
-    if (jsonStart >= 0) {
-      const parsed = JSON.parse(raw.slice(jsonStart)) as {
+// Extracts a human-readable message from a non-2xx response. Providers follow
+// the OpenAI shape ({ error: { message } }); we also dig a JSON body out of a
+// raw string as a fallback, then fall back to the plain text/status.
+async function httpError(res: Response): Promise<Error> {
+  const text = await res.text().catch(() => "");
+  let message = "";
+
+  const dig = (raw: string): string => {
+    try {
+      const parsed = JSON.parse(raw) as {
         error?: { message?: string };
+        message?: string;
       };
-      if (parsed.error?.message) return parsed.error.message;
+      return parsed.error?.message ?? parsed.message ?? "";
+    } catch {
+      return "";
     }
-  } catch {
-    /* not JSON — fall through to the raw message */
+  };
+
+  message = dig(text);
+  if (!message) {
+    const jsonStart = text.indexOf("{");
+    if (jsonStart >= 0) message = dig(text.slice(jsonStart));
   }
-  return raw || "Connection failed.";
+  if (!message) message = text || res.statusText || `Request failed (HTTP ${res.status}).`;
+  return new Error(message);
 }

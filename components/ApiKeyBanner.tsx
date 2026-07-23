@@ -2,20 +2,16 @@
 
 import { useSyncExternalStore } from "react";
 import {
-  hasCustomGeminiSettings,
+  hasLlmSettings,
   openApiSettings,
-  subscribeToGeminiSettings,
-} from "@/lib/geminiSettings";
+  subscribeToLlmSettings,
+} from "@/lib/llmSettings";
 
 // Onboarding nudge shown while no API key is configured. Explains the concept
 // up front — "your own key, stays in your browser" — so users aren't
 // surprised by the key prompt later and know why it's safe to add one.
 export function ApiKeyBanner() {
-  const hasKey = useSyncExternalStore(
-    subscribeToGeminiSettings,
-    hasCustomGeminiSettings,
-    () => false,
-  );
+  const hasKey = useSyncExternalStore(subscribeToLlmSettings, hasLlmSettings, () => false);
 
   if (hasKey) return null;
 
@@ -25,17 +21,17 @@ export function ApiKeyBanner() {
         <span aria-hidden className="mr-1.5">
           🔑
         </span>
-        LectureAlly works with <span className="text-text">your own Gemini API key</span> — stored
-        only in your browser, never on a server.{" "}
+        LectureAlly works with <span className="text-text">your own API key</span> — Gemini,
+        OpenAI, OpenRouter or any OpenAI-compatible endpoint, stored only in your browser.{" "}
         <a
           href="https://aistudio.google.com/apikey"
           target="_blank"
           rel="noopener noreferrer"
           className="text-accent underline"
         >
-          Get a free key
-        </a>
-        .
+          Get a free Gemini key
+        </a>{" "}
+        or bring your own.
       </p>
       <button
         type="button"

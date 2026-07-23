@@ -16,21 +16,46 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-## Bring your own Gemini API key
+## Bring your own API key (any provider)
 
-LectureAlly ships **without** a built-in API key — every user provides their own:
+LectureAlly ships **without** a built-in API key — every user provides their own. It works with
+**any OpenAI-compatible provider**, so you can pick the model you like. Open the ⚙️ icon in the
+header, choose a provider, enter your key and model, and hit **Save** (use **Test connection** to
+check first).
 
-1. Get a free key at [Google AI Studio](https://aistudio.google.com/apikey).
-2. Click the ⚙️ icon in the header, paste the key (optionally a custom base URL) and hit **Save**.
-   Use **Test connection** to check the key works before saving.
+> **Important:** every explanation sends the slide image to the model, so the model you pick must
+> support **image input (vision)**.
+
+### Easiest start: a free Google Gemini key
+
+1. Go to [Google AI Studio](https://aistudio.google.com/apikey) and sign in with a Google account.
+2. Click **Create API key** and copy the key (starts with `AIza…`).
+3. In LectureAlly, open ⚙️, leave the provider on **Google Gemini**, paste the key and hit **Save**.
+
+That's it — Gemini's free tier is plenty for trying the app out. (You're using your own key under
+your own account; the key never leaves your browser except to call the provider directly.)
+
+### Other providers
+
+| Provider | Base URL | Example model | Where to get a key |
+| --- | --- | --- | --- |
+| Google Gemini (default) | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-3.1-flash-lite` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| OpenRouter | `https://openrouter.ai/api/v1` | `google/gemini-3.1-flash-lite`, `anthropic/claude-…`, many more | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| Custom | any OpenAI-compatible endpoint | any vision model | your endpoint |
+
+**Custom** covers local or self-hosted servers, e.g. [Ollama](http://localhost:11434/v1) or
+[LM Studio](http://localhost:1234/v1) — pick a vision-capable model such as `llama3.2-vision`.
+[OpenRouter](https://openrouter.ai) is the simplest way to reach hundreds of models (including
+Claude and open-weight vision models) through a single key.
 
 Key handling:
 
 - The key is stored only in the browser (`localStorage`) and sent to the app's API routes as a
   request header; the settings dialog is the single source of truth.
-- The server never reads `GEMINI_API_KEY`/`GOOGLE_API_KEY` from the environment and never persists
-  the key — without a browser-provided key, generation requests fail fast with a
-  `MISSING_API_KEY` error and the UI prompts to add one.
+- The server never reads an API key from the environment and never persists the key — without a
+  browser-provided key, generation requests fail fast with a `MISSING_API_KEY` error and the UI
+  prompts to add one.
 - **Clear** in the settings dialog removes the key instantly.
 
 ## Export & import lectures
@@ -45,8 +70,8 @@ Every lecture in the library has an export button (⬇) that downloads a single
 
 Audio and slide images are deliberately left out: the app re-renders slides
 from the PDF and re-synthesizes narration with the free, key-less TTS
-endpoint on demand. So an imported lecture plays **without** a Gemini API
-key — a key is only needed to ask *new* questions.
+endpoint on demand. So an imported lecture plays **without** an API key — a key is only
+needed to ask *new* questions.
 
 To import, drop the `.lecture` file (or rename it to `.zip`) into the upload
 form on the start page. The archive is validated (manifest, PDF integrity,

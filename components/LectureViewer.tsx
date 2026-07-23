@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useLecture } from "@/hooks/useLecture";
-import { GEMINI_SETTINGS_CHANGED_EVENT } from "@/lib/geminiSettings";
+import { LLM_SETTINGS_CHANGED_EVENT } from "@/lib/llmSettings";
 import { LecturePlayer } from "./LecturePlayer";
 import { ChatPanel } from "./ChatPanel";
 
@@ -33,8 +33,8 @@ export function LectureViewer({
       const hasKey = (e as CustomEvent<{ hasKey: boolean }>).detail?.hasKey;
       if (hasKey && missingApiKey) retry();
     };
-    window.addEventListener(GEMINI_SETTINGS_CHANGED_EVENT, onSettingsChanged);
-    return () => window.removeEventListener(GEMINI_SETTINGS_CHANGED_EVENT, onSettingsChanged);
+    window.addEventListener(LLM_SETTINGS_CHANGED_EVENT, onSettingsChanged);
+    return () => window.removeEventListener(LLM_SETTINGS_CHANGED_EVENT, onSettingsChanged);
   }, [missingApiKey, retry]);
 
   // Focus the ask field once the (mobile) drawer has mounted / full screen has

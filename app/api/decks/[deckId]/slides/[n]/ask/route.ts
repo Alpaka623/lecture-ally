@@ -6,9 +6,9 @@ import {
   saveQnaAudio,
 } from "@/lib/data/deckStore";
 import { getOrRenderSlideImage } from "@/lib/pdf/slideImage";
-import { streamAnswer } from "@/lib/gemini/askQuestion";
-import { MissingApiKeyError } from "@/lib/gemini/client";
-import { MISSING_API_KEY_CODE } from "@/lib/geminiSettings";
+import { streamAnswer } from "@/lib/llm/askQuestion";
+import { MissingApiKeyError } from "@/lib/llm/client";
+import { MISSING_API_KEY_CODE } from "@/lib/llmSettings";
 import { synthesizeSpeech, voiceForLanguage } from "@/lib/tts/synthesize";
 
 export const runtime = "nodejs";
@@ -34,7 +34,7 @@ export async function POST(
     return NextResponse.json({ error: "Missing question" }, { status: 400 });
   }
 
-  // Kick off the Gemini stream before opening the response body, so immediate
+  // Kick off the LLM stream before opening the response body, so immediate
   // failures (missing API key, rejected request) still produce a regular JSON
   // error instead of a half-open stream.
   let deltas: AsyncGenerator<string>;

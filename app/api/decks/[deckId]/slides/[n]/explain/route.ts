@@ -7,10 +7,10 @@ import {
   slideAudioExists,
 } from "@/lib/data/deckStore";
 import { getOrRenderSlideImage } from "@/lib/pdf/slideImage";
-import { explainSlide } from "@/lib/gemini/explainSlide";
-import { coalesceExplanation } from "@/lib/gemini/explainInflight";
-import { MissingApiKeyError } from "@/lib/gemini/client";
-import { MISSING_API_KEY_CODE } from "@/lib/geminiSettings";
+import { explainSlide } from "@/lib/llm/explainSlide";
+import { coalesceExplanation } from "@/lib/llm/explainInflight";
+import { MissingApiKeyError } from "@/lib/llm/client";
+import { MISSING_API_KEY_CODE } from "@/lib/llmSettings";
 import { synthesizeSpeech, voiceForLanguage } from "@/lib/tts/synthesize";
 import { slideAudioUrl } from "@/lib/http/slideUrls";
 
@@ -35,7 +35,7 @@ export async function POST(
     // The player prefetches the next slide's explanation while the current
     // one plays; coalescing makes a real request that arrives while that
     // prefetch is still generating share its run instead of paying for (and
-    // racing the cache writes of) a second Gemini + TTS round trip.
+    // racing the cache writes of) a second LLM + TTS round trip.
     const prepared = await coalesceExplanation(deckId, slideNumber, async () => {
       let script = await getSlideScript(deckId, slideNumber);
       const audioAlreadyExists = await slideAudioExists(deckId, slideNumber);
@@ -58,7 +58,7 @@ export async function POST(
       // Captions (word timings) are tied to the audio, so synthesize whenever
       // either is missing. Slides generated before captions existed have both
       // script and audio but no timings — re-synthesize once (cheap TTS call,
-      // no Gemini) so old decks get karaoke captions too. Audio and captions
+      // no LLM) so old decks get karaoke captions too. Audio and captions
       // always come from the same synthesis run, so they can't drift apart.
       if (!audioAlreadyExists || !script.captions?.length) {
         const { audio, captions } = await synthesizeSpeech(script.text, voiceForLanguage(meta.language));

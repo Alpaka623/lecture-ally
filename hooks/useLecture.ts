@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { QnaEntry, WordTiming } from "@/lib/data/deckStore";
-import { geminiAuthHeaders, MISSING_API_KEY_CODE } from "@/lib/geminiSettings";
+import { llmAuthHeaders, MISSING_API_KEY_CODE } from "@/lib/llmSettings";
 import { slideAudioUrl } from "@/lib/http/slideUrls";
 
 // Error from our own API routes, carrying the machine-readable `code` so the
@@ -16,8 +16,8 @@ class ApiError extends Error {
 }
 
 // The /ask route answers with an NDJSON stream (one event per line): text
-// deltas while Gemini generates, then `done` with the audio once TTS finishes
-// (or `error` if something breaks mid-stream).
+// deltas while the model generates, then `done` with the audio once TTS
+// finishes (or `error` if something breaks mid-stream).
 type AskStreamEvent =
   | { type: "delta"; text: string }
   | { type: "done"; qnaId: string; audioUrl: string }
@@ -240,7 +240,7 @@ export function useLecture(deckId: string, slideCount: number) {
     // abort the first invocation's requests keep running — racing the second
     // invocation's requests against the same server-side cache files and
     // occasionally corrupting a JSON response. It also cancels wasted
-    // Gemini/TTS calls when the user navigates again before a slide finishes
+    // LLM/TTS calls when the user navigates again before a slide finishes
     // generating.
     const controller = new AbortController();
 
@@ -261,7 +261,7 @@ export function useLecture(deckId: string, slideCount: number) {
 
     fetch(`/api/decks/${deckId}/slides/${slideNumber}/explain`, {
       method: "POST",
-      headers: geminiAuthHeaders(),
+      headers: llmAuthHeaders(),
       signal: controller.signal,
     })
       .then(async (res) => {
@@ -308,11 +308,11 @@ export function useLecture(deckId: string, slideCount: number) {
         //   request when the user navigates.
         // - Concurrent duplicates (Strict Mode's double effect, navigation
         //   while the prefetch is still generating) are coalesced into one
-        //   Gemini + TTS run server-side.
+        //   LLM + TTS run server-side.
         if (slideNumber < slideCount) {
           fetch(`/api/decks/${deckId}/slides/${slideNumber + 1}/explain`, {
             method: "POST",
-            headers: geminiAuthHeaders(),
+            headers: llmAuthHeaders(),
           }).catch(() => {});
         }
       })
@@ -386,7 +386,7 @@ export function useLecture(deckId: string, slideCount: number) {
 
     const audio = mainAudioRef.current;
     if (!audio) {
-      // Stopped after a question: reload from cache (no Gemini call).
+      // Stopped after a question: reload from cache (no LLM call).
       loadAndPlayMain(loadTokenRef.current, slideAudioUrl(deckId, slideNumber));
       return;
     }
@@ -421,7 +421,7 @@ export function useLecture(deckId: string, slideCount: number) {
       try {
         const res = await fetch(`/api/decks/${deckId}/slides/${slideNumber}/ask`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", ...geminiAuthHeaders() },
+          headers: { "Content-Type": "application/json", ...llmAuthHeaders() },
           body: JSON.stringify({ question }),
         });
         if (!res.ok) {

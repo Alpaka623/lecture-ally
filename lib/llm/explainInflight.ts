@@ -12,7 +12,7 @@ export interface PreparedExplanation {
 // The player speculatively prefetches the next slide's explanation while the
 // current one plays; if the user advances before the prefetch settles, the
 // navigation's real /explain request must join the running preparation
-// instead of starting a second Gemini + TTS run (double cost, double rate-
+// instead of starting a second LLM + TTS run (double cost, double rate-
 // limit pressure, and two writers racing the same cache files). React Strict
 // Mode's dev-only effect double-invoke lands here for the same reason.
 const inflight = new Map<string, Promise<PreparedExplanation>>();

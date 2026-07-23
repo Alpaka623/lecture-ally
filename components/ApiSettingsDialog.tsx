@@ -2,20 +2,31 @@
 
 import { useEffect, useState } from "react";
 import {
-  clearGeminiSettings,
-  loadGeminiSettings,
+  clearLlmSettings,
+  DEFAULT_LLM_SETTINGS,
+  LLM_PROVIDERS,
+  loadLlmSettings,
   OPEN_SETTINGS_EVENT,
-  saveGeminiSettings,
-} from "@/lib/geminiSettings";
+  providerById,
+  saveLlmSettings,
+} from "@/lib/llmSettings";
 
-type TestState = { status: "idle" } | { status: "testing" } | { status: "ok" } | { status: "fail"; error: string };
+type TestState =
+  | { status: "idle" }
+  | { status: "testing" }
+  | { status: "ok" }
+  | { status: "fail"; error: string };
 
 export function ApiSettingsDialog() {
   const [open, setOpen] = useState(false);
-  const [apiKey, setApiKey] = useState("");
+  const [providerId, setProviderId] = useState(DEFAULT_LLM_SETTINGS.providerId);
   const [baseUrl, setBaseUrl] = useState("");
+  const [model, setModel] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [test, setTest] = useState<TestState>({ status: "idle" });
+
+  const provider = providerById(providerId);
 
   // Other components (player error overlay, home banner) can request opening
   // the dialog by dispatching OPEN_SETTINGS_EVENT.
@@ -34,30 +45,48 @@ export function ApiSettingsDialog() {
   }, [open]);
 
   function openDialog() {
-    const current = loadGeminiSettings();
-    setApiKey(current.apiKey);
+    const current = loadLlmSettings();
+    setProviderId(current.providerId);
     setBaseUrl(current.baseUrl);
+    setModel(current.model);
+    setApiKey(current.apiKey);
     setShowKey(false);
     setTest({ status: "idle" });
     setOpen(true);
   }
 
+  // Switching provider pre-fills its base URL and default model. The API key
+  // is kept — some users reuse one key across compatible endpoints.
+  function handleProviderChange(nextId: string) {
+    const next = providerById(nextId);
+    setProviderId(nextId);
+    setBaseUrl(next.baseUrl);
+    setModel(next.defaultModel);
+    setTest({ status: "idle" });
+  }
+
   function handleSave() {
-    saveGeminiSettings({ apiKey, baseUrl });
+    saveLlmSettings({ providerId, baseUrl, apiKey, model });
     setOpen(false);
   }
 
   function handleClear() {
-    clearGeminiSettings();
+    clearLlmSettings();
+    setProviderId(DEFAULT_LLM_SETTINGS.providerId);
+    setBaseUrl(providerById(DEFAULT_LLM_SETTINGS.providerId).baseUrl);
+    setModel(providerById(DEFAULT_LLM_SETTINGS.providerId).defaultModel);
     setApiKey("");
-    setBaseUrl("");
   }
 
-  // Prove the key (and base URL) work before saving — hits our verify route,
-  // which lists models: authenticates without spending generation tokens.
+  // Prove the config works before saving — hits our verify route, which lists
+  // models: authenticates without spending generation tokens.
   async function handleTest() {
     if (!apiKey.trim()) {
       setTest({ status: "fail", error: "Enter an API key first." });
+      return;
+    }
+    if (!baseUrl.trim()) {
+      setTest({ status: "fail", error: "Pick a provider (or enter a base URL) first." });
       return;
     }
     setTest({ status: "testing" });
@@ -65,7 +94,7 @@ export function ApiSettingsDialog() {
       const res = await fetch("/api/settings/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey, baseUrl }),
+        body: JSON.stringify({ apiKey, baseUrl, model }),
       });
       const data: { ok?: boolean; error?: string } = await res.json().catch(() => ({}));
       if (data.ok) {
@@ -99,7 +128,7 @@ export function ApiSettingsDialog() {
           onClick={() => setOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-lg border border-border bg-panel p-6 shadow-xl"
+            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg border border-border bg-panel p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-5 flex items-center justify-between">
@@ -118,6 +147,26 @@ export function ApiSettingsDialog() {
 
             <div className="flex flex-col gap-4">
               <label className="flex flex-col gap-2">
+                <span className="label-mono text-xs text-text-muted">Provider</span>
+                <select
+                  value={providerId}
+                  onChange={(e) => handleProviderChange(e.target.value)}
+                  className={`${inputClass} appearance-none bg-panel`}
+                >
+                  {LLM_PROVIDERS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-text-faint">
+                  {provider.id === "custom"
+                    ? "Any OpenAI-compatible endpoint — e.g. Ollama (http://localhost:11434/v1) or LM Studio (http://localhost:1234/v1)."
+                    : "Uses the provider's OpenAI-compatible API. The model below must accept image input."}
+                </p>
+              </label>
+
+              <label className="flex flex-col gap-2">
                 <span className="label-mono text-xs text-text-muted">API Key</span>
                 <div className="flex gap-2">
                   <input
@@ -127,7 +176,7 @@ export function ApiSettingsDialog() {
                       setApiKey(e.target.value);
                       setTest({ status: "idle" });
                     }}
-                    placeholder="AIza…"
+                    placeholder={provider.keyPlaceholder}
                     autoComplete="off"
                     spellCheck={false}
                     className={inputClass}
@@ -140,22 +189,52 @@ export function ApiSettingsDialog() {
                     {showKey ? "Hide" : "Show"}
                   </button>
                 </div>
+                {provider.keyUrl ? (
+                  <p className="text-xs text-text-faint">
+                    No key yet?{" "}
+                    {provider.id === "gemini" ? "Get a free one" : "Get one"} at{" "}
+                    <a
+                      href={provider.keyUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-text-muted underline hover:text-text"
+                    >
+                      {provider.id === "gemini"
+                        ? "Google AI Studio"
+                        : provider.id === "openai"
+                          ? "platform.openai.com"
+                          : "openrouter.ai"}
+                    </a>
+                    .
+                  </p>
+                ) : (
+                  <p className="text-xs text-text-faint">
+                    Use the key issued by your endpoint — local servers often accept any value.
+                  </p>
+                )}
+              </label>
+
+              <label className="flex flex-col gap-2">
+                <span className="label-mono text-xs text-text-muted">Model</span>
+                <input
+                  type="text"
+                  value={model}
+                  onChange={(e) => {
+                    setModel(e.target.value);
+                    setTest({ status: "idle" });
+                  }}
+                  placeholder={provider.defaultModel}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className={inputClass}
+                />
                 <p className="text-xs text-text-faint">
-                  No key yet? Get a free one at{" "}
-                  <a
-                    href="https://aistudio.google.com/apikey"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-text-muted underline hover:text-text"
-                  >
-                    Google AI Studio
-                  </a>
-                  .
+                  Must support image input (vision) — every explanation sends the slide image.
                 </p>
               </label>
 
               <label className="flex flex-col gap-2">
-                <span className="label-mono text-xs text-text-muted">Base URL (optional)</span>
+                <span className="label-mono text-xs text-text-muted">Base URL</span>
                 <input
                   type="text"
                   value={baseUrl}
@@ -163,7 +242,7 @@ export function ApiSettingsDialog() {
                     setBaseUrl(e.target.value);
                     setTest({ status: "idle" });
                   }}
-                  placeholder="https://generativelanguage.googleapis.com"
+                  placeholder="https://…/v1"
                   autoComplete="off"
                   spellCheck={false}
                   className={inputClass}
@@ -193,7 +272,7 @@ export function ApiSettingsDialog() {
                 <p className="label-mono mb-1.5 text-[10px] text-text-faint">Where your key goes</p>
                 <ul className="flex flex-col gap-1 text-xs leading-relaxed text-text-muted">
                   <li>· Stored only in this browser (localStorage) — never on a server.</li>
-                  <li>· Used solely to request explanations from Gemini (or your base URL).</li>
+                  <li>· Used solely to request explanations from your chosen provider.</li>
                   <li>· Clear removes it instantly. You stay in control of your usage.</li>
                 </ul>
               </div>

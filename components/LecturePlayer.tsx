@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type SVGProps } from "react";
 import type { NarrationState } from "@/hooks/useLecture";
 import type { WordTiming } from "@/lib/data/deckStore";
-import { openApiSettings } from "@/lib/geminiSettings";
+import { openApiSettings } from "@/lib/llmSettings";
 import { SlideImage } from "./SlideImage";
 import { KaraokeCaptions } from "./KaraokeCaptions";
 import { SeekBar, formatTime } from "./SeekBar";
@@ -271,7 +271,7 @@ export function LecturePlayer({
               🔑
             </span>
             <div className="flex flex-col gap-1.5">
-              <p className="label-mono text-xs text-accent">Your Gemini API key is needed</p>
+              <p className="label-mono text-xs text-accent">Your API key is needed</p>
               <p className="max-w-sm text-sm leading-relaxed text-text-muted">
                 LectureAlly ships without a built-in key, so your usage stays yours. Add your own
                 key — it is stored only in this browser.
