@@ -16,6 +16,12 @@ function formatSize(bytes: number): string {
   return `${Math.round(bytes / 1024)} KB`;
 }
 
+// A .lecture/.zip file is a deck export to re-import (title, language and
+// scripts come from its manifest); anything else is treated as a PDF upload.
+function isDeckArchive(file: File): boolean {
+  return /\.(lecture|zip)$/i.test(file.name) || file.type === "application/zip";
+}
+
 export function UploadForm() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -36,18 +42,24 @@ export function UploadForm() {
     setError(null);
 
     if (!file) {
-      setError("Please select a PDF file.");
+      setError("Please select a PDF or .lecture file.");
       return;
     }
 
+    const archive = isDeckArchive(file);
     const formData = new FormData();
     formData.set("file", file);
-    formData.set("language", language);
-    formData.set("title", title);
+    if (!archive) {
+      formData.set("language", language);
+      formData.set("title", title);
+    }
 
     setIsUploading(true);
     try {
-      const res = await fetch("/api/decks", { method: "POST", body: formData });
+      const res = await fetch(archive ? "/api/decks/import" : "/api/decks", {
+        method: "POST",
+        body: formData,
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: "Upload failed" }));
         throw new Error(body.error ?? "Upload failed");
@@ -106,7 +118,7 @@ export function UploadForm() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="application/pdf"
+              accept="application/pdf,.lecture,.zip,application/zip"
               className="hidden"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
@@ -134,7 +146,9 @@ export function UploadForm() {
                 <span aria-hidden className="text-2xl text-text-faint">
                   📄
                 </span>
-                <p className="text-sm text-text-muted">Drag a PDF here or click to browse</p>
+                <p className="text-sm text-text-muted">
+                  Drag a PDF or a .lecture export here, or click to browse
+                </p>
               </>
             )}
           </div>

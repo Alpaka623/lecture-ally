@@ -33,6 +33,26 @@ Key handling:
   `MISSING_API_KEY` error and the UI prompts to add one.
 - **Clear** in the settings dialog removes the key instantly.
 
+## Export & import lectures
+
+Every lecture in the library has an export button (⬇) that downloads a single
+`.lecture` file — a plain ZIP containing:
+
+- `manifest.json` — format/version and the deck metadata (title, language, slide count)
+- `original.pdf` — the uploaded slides
+- `scripts/slide-N.json` — the generated narration text (+ word timings)
+- `qna/slide-N.json` — the slide's question/answer history
+
+Audio and slide images are deliberately left out: the app re-renders slides
+from the PDF and re-synthesizes narration with the free, key-less TTS
+endpoint on demand. So an imported lecture plays **without** a Gemini API
+key — a key is only needed to ask *new* questions.
+
+To import, drop the `.lecture` file (or rename it to `.zip`) into the upload
+form on the start page. The archive is validated (manifest, PDF integrity,
+slide count) and materialized as a brand-new deck — the same file can be
+imported any number of times.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
