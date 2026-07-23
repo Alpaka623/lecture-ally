@@ -22,6 +22,12 @@ const STATUS_LABEL: Record<NarrationState, string> = {
 // wrong words while the professor speaks the answer.
 const CAPTION_STATES: NarrationState[] = ["narrating", "paused"];
 
+// YouTube-style idle hide: while the narration plays, the chrome fades out
+// after this long without activity. Once the pointer has left the player
+// entirely we tuck it away sooner.
+const CHROME_HIDE_DELAY = 3000;
+const CHROME_HIDE_DELAY_AFTER_LEAVE = 1000;
+
 function Icon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props} />
@@ -153,6 +159,22 @@ export function LecturePlayer({
   // Initialize to the server-safe default; reconcile with the stored preference
   // after mount so server and client HTML always match during hydration.
   const [showCaptions, setShowCaptions] = useState(true);
+  // Chrome visibility for the YouTube-style idle hide (see effects below).
+  const [chromeVisible, setChromeVisible] = useState(true);
+  const chromeVisibleRef = useRef(chromeVisible);
+  // Big play/pause glyph that flashes over the stage when playback is
+  // toggled by tapping the slide itself.
+  const [flash, setFlash] = useState<{ kind: "play" | "pause"; key: number } | null>(null);
+  const flashKeyRef = useRef(0);
+  // Timestamp of the last user activity, read by the idle-hide tick above.
+  const lastActivityRef = useRef(0);
+  // How long to wait before hiding; shortened when the pointer leaves.
+  const hideDelayRef = useRef(CHROME_HIDE_DELAY);
+  // True while keyboard focus sits on a control inside the player.
+  const focusInsideRef = useRef(false);
+  // Set on pointerdown when that tap's only job is revealing the chrome, so
+  // the follow-up click on the stage skips the play/pause toggle.
+  const revealTapRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -166,6 +188,86 @@ export function LecturePlayer({
     const onChange = () => setIsFullscreen(document.fullscreenElement === playerRef.current);
     document.addEventListener("fullscreenchange", onChange);
     return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  useEffect(() => {
+    chromeVisibleRef.current = chromeVisible;
+  }, [chromeVisible]);
+
+  // Idle hide: active only while the chrome is up and the narration actually
+  // runs — paused, loading or error states keep the controls within reach.
+  // Pointer activity doesn't restart a timeout per mouse tick (that would
+  // re-render on every movement); it only refreshes a timestamp that the
+  // single running timeout checks, postponing the hide when needed.
+  useEffect(() => {
+    if (narrationState !== "narrating" || !chromeVisible) return;
+    lastActivityRef.current = Date.now();
+    let timer = 0;
+    const tick = () => {
+      // Keyboard focus inside the chrome keeps it up (re-checked on a short
+      // leash so focus loss is noticed promptly).
+      if (focusInsideRef.current) {
+        timer = window.setTimeout(tick, 500);
+        return;
+      }
+      const idleFor = Date.now() - lastActivityRef.current;
+      if (idleFor < hideDelayRef.current) {
+        timer = window.setTimeout(tick, hideDelayRef.current - idleFor);
+        return;
+      }
+      setChromeVisible(false);
+    };
+    timer = window.setTimeout(tick, hideDelayRef.current);
+    return () => window.clearTimeout(timer);
+  }, [narrationState, chromeVisible]);
+
+  useEffect(() => {
+    const el = playerRef.current;
+    if (!el) return;
+    // Registers activity without re-rendering; only the hidden→visible
+    // transition itself touches state.
+    const wake = () => {
+      lastActivityRef.current = Date.now();
+      hideDelayRef.current = CHROME_HIDE_DELAY;
+      if (!chromeVisibleRef.current) setChromeVisible(true);
+    };
+    const onPointerDown = () => {
+      // Touch has no hover to reveal the chrome, so a tap on the hidden
+      // player only brings the controls back — the click that follows must
+      // not immediately toggle playback.
+      revealTapRef.current = !chromeVisibleRef.current;
+      wake();
+    };
+    const onPointerLeave = (e: PointerEvent) => {
+      // Touch pointers "leave" the moment the finger lifts — that must not
+      // shorten the post-tap visibility window.
+      if (e.pointerType === "touch") return;
+      lastActivityRef.current = Date.now();
+      hideDelayRef.current = CHROME_HIDE_DELAY_AFTER_LEAVE;
+    };
+    const onFocusIn = () => {
+      // Only keyboard focus (:focus-visible) pins the chrome — a mouse click
+      // on a control must not stop the idle hide.
+      const active = document.activeElement;
+      focusInsideRef.current =
+        active instanceof HTMLElement && el.contains(active) && active.matches(":focus-visible");
+    };
+    const onFocusOut = () => {
+      focusInsideRef.current = false;
+      wake();
+    };
+    el.addEventListener("pointermove", wake);
+    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("pointerleave", onPointerLeave);
+    el.addEventListener("focusin", onFocusIn);
+    el.addEventListener("focusout", onFocusOut);
+    return () => {
+      el.removeEventListener("pointermove", wake);
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("pointerleave", onPointerLeave);
+      el.removeEventListener("focusin", onFocusIn);
+      el.removeEventListener("focusout", onFocusOut);
+    };
   }, []);
 
   const toggleCaptions = () =>
@@ -205,19 +307,37 @@ export function LecturePlayer({
   const muted = volume === 0;
   const showCaptionText = showCaptions && !!scriptText && CAPTION_STATES.includes(narrationState);
 
+  // Tapping the slide toggles the narration — the same contract as YouTube's
+  // player. If the chrome was hidden, the tap only revealed it (handled via
+  // revealTapRef) and playback stays untouched.
+  const handleStageClick = () => {
+    if (revealTapRef.current) {
+      revealTapRef.current = false;
+      return;
+    }
+    if (playDisabled) return;
+    flashKeyRef.current += 1;
+    setFlash({ kind: isPlaying ? "pause" : "play", key: flashKeyRef.current });
+    onTogglePlayPause();
+  };
+
   return (
     <div
       ref={playerRef}
-      className={`group relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#05070a] ${
+      className={`relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#05070a] ${
         isFullscreen ? "rounded-none" : "rounded-xl border border-border"
-      }`}
+      } ${chromeVisible ? "" : "cursor-none"}`}
     >
       {/* Ambient stage: a soft warm glow behind the letterboxed slide */}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_90%_at_50%_-10%,rgba(242,182,50,0.10),transparent_55%)]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_120%,rgba(242,182,50,0.06),transparent_60%)]" />
 
       {/* Top status scrim */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-black/70 via-black/25 to-transparent px-4 py-3">
+      <div
+        className={`pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-black/70 via-black/25 to-transparent px-4 py-3 transition-[opacity,transform] duration-300 ease-out ${
+          chromeVisible ? "" : "-translate-y-2 opacity-0"
+        }`}
+      >
         <div className="flex items-center justify-between">
           <span
             className={`label-mono pointer-events-auto inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] backdrop-blur-sm ${
@@ -239,7 +359,12 @@ export function LecturePlayer({
       </div>
 
       {/* Stage */}
-      <div className="relative flex min-h-0 flex-1 items-center justify-center px-2 py-2">
+      <div
+        onClick={handleStageClick}
+        className={`relative flex min-h-0 flex-1 items-center justify-center px-2 py-2 ${
+          chromeVisible ? "cursor-pointer" : ""
+        }`}
+      >
         {/* suppressHydrationWarning: browser extensions sometimes strip the
             `disabled` attribute from buttons before React hydrates, which
             trips a mismatch warning even though the server HTML is correct.
@@ -247,11 +372,16 @@ export function LecturePlayer({
             stays correct either way. */}
         <button
           type="button"
-          onClick={goPrev}
+          onClick={(e) => {
+            e.stopPropagation();
+            goPrev();
+          }}
           disabled={!canGoPrev}
           suppressHydrationWarning
           aria-label="Previous slide"
-          className="absolute left-2 z-10 grid h-10 w-10 place-items-center rounded-full bg-black/30 text-white/80 opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-black/55 hover:text-white enabled:group-hover:opacity-100 disabled:cursor-default"
+          className={`absolute left-2 z-10 grid h-10 w-10 place-items-center rounded-full bg-black/30 text-white/80 backdrop-blur-sm transition-all duration-200 hover:bg-black/55 hover:text-white disabled:cursor-default ${
+            chromeVisible ? "opacity-100 disabled:opacity-0" : "pointer-events-none opacity-0"
+          }`}
         >
           <ChevronLeft className="h-6 w-6" />
         </button>
@@ -300,20 +430,49 @@ export function LecturePlayer({
 
         <button
           type="button"
-          onClick={goNext}
+          onClick={(e) => {
+            e.stopPropagation();
+            goNext();
+          }}
           disabled={!canGoNext}
           suppressHydrationWarning
           aria-label="Next slide"
-          className="absolute right-2 z-10 grid h-10 w-10 place-items-center rounded-full bg-black/30 text-white/80 opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-black/55 hover:text-white disabled:opacity-0 group-hover:opacity-100 enabled:group-hover:opacity-100"
+          className={`absolute right-2 z-10 grid h-10 w-10 place-items-center rounded-full bg-black/30 text-white/80 backdrop-blur-sm transition-all duration-200 hover:bg-black/55 hover:text-white disabled:cursor-default ${
+            chromeVisible ? "opacity-100 disabled:opacity-0" : "pointer-events-none opacity-0"
+          }`}
         >
           <ChevronRight className="h-6 w-6" />
         </button>
+
+        {/* Play/pause flash after a tap on the slide */}
+        {flash && (
+          <div
+            key={flash.key}
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
+          >
+            <span
+              className="chrome-flash grid h-20 w-20 place-items-center rounded-full bg-black/60 text-white shadow-2xl backdrop-blur-sm"
+              onAnimationEnd={() => setFlash(null)}
+            >
+              {flash.kind === "play" ? (
+                <PlayIcon className="h-10 w-10 translate-x-0.5" />
+              ) : (
+                <PauseIcon className="h-10 w-10" />
+              )}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Captions overlay (CC): karaoke-style word-by-word when timings are
           available, full-text fallback otherwise */}
       {showCaptionText && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-24 z-10 flex justify-center px-6">
+        <div
+          className={`pointer-events-none absolute inset-x-0 z-10 flex justify-center px-6 transition-[bottom] duration-300 ease-out ${
+            chromeVisible ? "bottom-24" : "bottom-6"
+          }`}
+        >
           {captions.length > 0 ? (
             <KaraokeCaptions words={captions} time={audioTime} />
           ) : (
@@ -325,7 +484,11 @@ export function LecturePlayer({
       )}
 
       {/* Bottom control bar */}
-      <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-3 pb-2.5 pt-10">
+      <div
+        className={`absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-3 pb-2.5 pt-10 transition-[opacity,transform] duration-300 ease-out ${
+          chromeVisible ? "" : "pointer-events-none translate-y-3 opacity-0"
+        }`}
+      >
         <SeekBar
           currentTime={audioTime}
           duration={audioDuration}

@@ -129,6 +129,34 @@ body {
   box-shadow: 0 0 0 4px rgba(242, 182, 50, 0.25);
 }
 
+/* Big play/pause glyph that pops over the stage when playback is toggled
+   by tapping the slide (YouTube-style feedback). */
+@keyframes chrome-flash {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  25% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.4);
+  }
+}
+
+.chrome-flash {
+  animation: chrome-flash 600ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chrome-flash {
+    animation: none;
+    opacity: 0;
+  }
+}
+
 /* Caption lines fade/rise in slightly when the karaoke captions advance to
    the next line. */
 @keyframes caption-in {
