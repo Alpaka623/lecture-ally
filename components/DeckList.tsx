@@ -28,10 +28,10 @@ export function DeckList({ decks }: { decks: DeckMeta[] }) {
         <li key={deck.id} className="flex items-stretch gap-2">
           <Link
             href={`/decks/${deck.id}`}
-            className="flex flex-1 items-center justify-between rounded border border-border px-4 py-3 text-text transition-colors hover:border-border-strong hover:bg-panel"
+            className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded border border-border px-4 py-3 text-text transition-colors hover:border-border-strong hover:bg-panel"
           >
-            <span className="font-medium">{deck.title}</span>
-            <span className="label-mono text-xs text-text-muted">
+            <span className="min-w-0 truncate font-medium">{deck.title}</span>
+            <span className="label-mono shrink-0 whitespace-nowrap text-xs text-text-muted">
               {deck.slideCount} slides · {deck.language.toUpperCase()}
             </span>
           </Link>

@@ -128,7 +128,7 @@ export function ApiSettingsDialog() {
           onClick={() => setOpen(false)}
         >
           <div
-            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg border border-border bg-panel p-6 shadow-xl"
+            className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-lg border border-border bg-panel p-5 shadow-xl sm:p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-5 flex items-center justify-between">

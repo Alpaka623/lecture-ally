@@ -10,14 +10,14 @@ export default async function Home() {
 
   return (
     <>
-      <header className="flex items-center justify-between border-b border-border px-6 py-4">
+      <header className="flex items-center justify-between border-b border-border px-4 py-4 sm:px-6">
         <Logo />
         <ApiSettingsDialog />
       </header>
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center gap-12 px-6 py-16">
-        <div className="flex flex-col items-center gap-6 text-center">
-          <h1 className="font-display text-6xl leading-[0.95] tracking-tight sm:text-8xl">
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center gap-8 px-4 py-10 sm:gap-12 sm:px-6 sm:py-16">
+        <div className="flex flex-col items-center gap-4 text-center sm:gap-6">
+          <h1 className="font-display text-5xl leading-[0.95] tracking-tight sm:text-8xl">
             Lecture<span className="text-accent">Ally</span>
           </h1>
           <p className="max-w-md text-balance text-sm text-text-muted sm:text-base">

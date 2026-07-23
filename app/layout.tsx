@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Anton } from "next/font/google";
 import "./globals.css";
 
@@ -21,6 +21,15 @@ const anton = Anton({
 export const metadata: Metadata = {
   title: "LectureAlly",
   description: "Upload lecture slides and have an AI professor narrate them.",
+};
+
+// resizes-content: when the phone's keyboard opens, shrink the layout
+// viewport instead of just covering it — the chat input (and the dvh-based
+// deck layout) reflow above the keyboard instead of hiding behind it.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({

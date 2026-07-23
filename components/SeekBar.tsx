@@ -95,7 +95,7 @@ export function SeekBar({
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerLeave}
       onKeyDown={handleKeyDown}
-      className={`group relative flex h-4 w-full touch-none items-center rounded outline-none select-none focus-visible:ring-2 focus-visible:ring-white/70 ${
+      className={`group relative flex h-6 w-full touch-none items-center rounded outline-none select-none focus-visible:ring-2 focus-visible:ring-white/70 sm:h-4 ${
         ready ? "cursor-pointer" : "cursor-default opacity-40"
       }`}
     >
@@ -105,8 +105,8 @@ export function SeekBar({
           style={{ width: `${playheadRatio * 100}%` }}
         />
         <div
-          className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent shadow transition-transform duration-100 ${
-            dragRatio !== null ? "scale-125" : "scale-0 group-hover:scale-100"
+          className={`absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent shadow transition-transform duration-100 sm:h-3 sm:w-3 ${
+            dragRatio !== null ? "scale-125" : "max-sm:scale-100 scale-0 group-hover:scale-100"
           }`}
           style={{ left: `${playheadRatio * 100}%` }}
         />

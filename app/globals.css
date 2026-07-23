@@ -173,3 +173,29 @@ body {
 .caption-line {
   animation: caption-in 200ms ease-out;
 }
+
+/* YouTube-style full screen on portrait phones: a wide slide inside a tall
+   frame would be mostly black letterbox, so we rotate the player into
+   landscape. We drive it from JS (the .la-pseudo-fs class) with a fixed
+   overlay instead of the Fullscreen API — the API can't rotate a phone, and
+   in desktop responsive-devtools a real fullscreen targets the landscape
+   monitor, so an :fullscreen-based rule would never fire there. Keying off
+   the viewport (not the OS fullscreen state) makes the turn show on a real
+   phone and in devtools alike. The base rule lifts the player over
+   everything; the portrait media query swaps its box to 100vh × 100vw and
+   turns it 90°, which makes the *inner* layout believe it is landscape (the
+   slide fills the long edge), and the translate recentres the rotated box. */
+[data-la-player].la-pseudo-fs {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  border-radius: 0;
+}
+
+@media (orientation: portrait) and (max-width: 1023px) {
+  [data-la-player].la-pseudo-fs {
+    width: 100vh;
+    height: 100vw;
+    transform: translate(calc(50vw - 50vh), calc(50vh - 50vw)) rotate(90deg);
+  }
+}

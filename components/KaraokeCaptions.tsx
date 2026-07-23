@@ -73,7 +73,7 @@ export function KaraokeCaptions({ words, time }: { words: WordTiming[]; time: nu
   return (
     <p
       key={lineIndex}
-      className="caption-line max-w-3xl rounded-md bg-black/75 px-4 py-1.5 text-center text-base leading-snug text-white shadow-lg sm:text-lg"
+      className="caption-line max-w-3xl rounded-md bg-black/75 px-3 py-1 text-center text-sm leading-snug text-white shadow-lg sm:px-4 sm:py-1.5 sm:text-lg"
     >
       {words.slice(line.start, line.end).map((word, i) => {
         const index = line.start + i;

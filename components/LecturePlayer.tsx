@@ -156,6 +156,22 @@ export function LecturePlayer({
 }) {
   const playerRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // On portrait phones we fake full screen with a fixed, rotated overlay
+  // instead of the Fullscreen API: the API can't rotate a phone, and in
+  // desktop responsive-devtools a real fullscreen targets the (landscape)
+  // monitor — so the YouTube-style turn would never show there. The overlay
+  // keys off the portrait viewport, so it works on a real phone and in
+  // devtools alike. `anyFs` is what the chrome reacts to.
+  const [pseudoFs, setPseudoFs] = useState(false);
+  const anyFs = isFullscreen || pseudoFs;
+  const isPortraitPhone = () =>
+    typeof window !== "undefined" && matchMedia("(orientation: portrait) and (max-width: 1023px)").matches;
+  // The slide's aspect ratio, measured from the image once it loads. On
+  // phones in portrait the stage sizes itself by this instead of flexing to
+  // fill the screen — a 16:10 slide in a tall, narrow player would otherwise
+  // be mostly letterboxing (and the freed space goes to the chat below).
+  // 16 / 9 is the placeholder until the first slide reports in.
+  const [slideAspect, setSlideAspect] = useState("16 / 9");
   // Initialize to the server-safe default; reconcile with the stored preference
   // after mount so server and client HTML always match during hydration.
   const [showCaptions, setShowCaptions] = useState(true);
@@ -189,6 +205,17 @@ export function LecturePlayer({
     document.addEventListener("fullscreenchange", onChange);
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
+
+  // Escape closes the pseudo full screen (the real Fullscreen API has its own
+  // Escape handling).
+  useEffect(() => {
+    if (!pseudoFs) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPseudoFs(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pseudoFs]);
 
   useEffect(() => {
     chromeVisibleRef.current = chromeVisible;
@@ -282,6 +309,14 @@ export function LecturePlayer({
     });
 
   const toggleFullscreen = () => {
+    if (pseudoFs) {
+      setPseudoFs(false);
+      return;
+    }
+    if (isPortraitPhone()) {
+      setPseudoFs(true);
+      return;
+    }
     const el = playerRef.current;
     if (!el) return;
     if (document.fullscreenElement) document.exitFullscreen();
@@ -298,6 +333,7 @@ export function LecturePlayer({
         /* ignore */
       }
     }
+    setPseudoFs(false);
     onOpenChat();
   };
 
@@ -324,9 +360,10 @@ export function LecturePlayer({
   return (
     <div
       ref={playerRef}
+      data-la-player
       className={`relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#05070a] ${
-        isFullscreen ? "rounded-none" : "rounded-xl border border-border"
-      } ${chromeVisible ? "" : "cursor-none"}`}
+        anyFs ? "rounded-none" : "rounded-xl border border-border max-lg:portrait:flex-none"
+      } ${pseudoFs ? "la-pseudo-fs" : ""} ${chromeVisible ? "" : "cursor-none"}`}
     >
       {/* Ambient stage: a soft warm glow behind the letterboxed slide */}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_90%_at_50%_-10%,rgba(242,182,50,0.10),transparent_55%)]" />
@@ -361,9 +398,10 @@ export function LecturePlayer({
       {/* Stage */}
       <div
         onClick={handleStageClick}
+        style={{ aspectRatio: slideAspect }}
         className={`relative flex min-h-0 flex-1 items-center justify-center px-2 py-2 ${
           chromeVisible ? "cursor-pointer" : ""
-        }`}
+        } ${anyFs ? "" : "max-lg:portrait:max-h-[45dvh] max-lg:portrait:flex-none"}`}
       >
         {/* suppressHydrationWarning: browser extensions sometimes strip the
             `disabled` attribute from buttons before React hydrates, which
@@ -386,12 +424,22 @@ export function LecturePlayer({
           <ChevronLeft className="h-6 w-6" />
         </button>
 
-        <SlideImage deckId={deckId} slideNumber={slideNumber} />
+        <SlideImage
+          deckId={deckId}
+          slideNumber={slideNumber}
+          onNaturalSize={(w, h) => setSlideAspect(`${w} / ${h}`)}
+        />
 
         {isLoading && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-[#05070a]/80 backdrop-blur-sm">
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-[#05070a]/80 px-6 backdrop-blur-sm">
             <span className="h-9 w-9 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-            <p className="label-mono text-xs text-accent">The professor is preparing the explanation…</p>
+            {/* The spinner already reads as "loading", so the caption is
+                desktop-only — on a narrow phone it would overflow the stage.
+                text-center + max-w-full keep it inside the container if the
+                player is ever narrow enough to wrap it. */}
+            <p className="label-mono hidden max-w-full text-center text-xs text-accent sm:block">
+              The professor is preparing the explanation…
+            </p>
           </div>
         )}
 
@@ -469,14 +517,14 @@ export function LecturePlayer({
           available, full-text fallback otherwise */}
       {showCaptionText && (
         <div
-          className={`pointer-events-none absolute inset-x-0 z-10 flex justify-center px-6 transition-[bottom] duration-300 ease-out ${
-            chromeVisible ? "bottom-24" : "bottom-6"
+          className={`pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4 transition-[bottom] duration-300 ease-out sm:px-6 ${
+            chromeVisible ? "bottom-24 sm:bottom-28" : "bottom-6"
           }`}
         >
           {captions.length > 0 ? (
             <KaraokeCaptions words={captions} time={audioTime} />
           ) : (
-            <p className="max-w-3xl rounded-md bg-black/75 px-4 py-1.5 text-center text-base leading-snug text-white shadow-lg sm:text-lg">
+            <p className="max-w-3xl rounded-md bg-black/75 px-3 py-1 text-center text-sm leading-snug text-white shadow-lg sm:px-4 sm:py-1.5 sm:text-lg">
               {scriptText}
             </p>
           )}
@@ -485,7 +533,7 @@ export function LecturePlayer({
 
       {/* Bottom control bar */}
       <div
-        className={`absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-3 pb-2.5 pt-10 transition-[opacity,transform] duration-300 ease-out ${
+        className={`absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-2 pb-2 pt-5 transition-[opacity,transform] duration-300 ease-out sm:px-3 sm:pb-2.5 sm:pt-10 ${
           chromeVisible ? "" : "pointer-events-none translate-y-3 opacity-0"
         }`}
       >
@@ -540,17 +588,23 @@ export function LecturePlayer({
               <CcIcon className="h-6 w-6" />
             </ChromeButton>
 
-            {/* Only shown below lg — on desktop the chat sidebar is always
-                visible, so the button would be redundant there. */}
-            <ChromeButton label="Ask the professor" className="lg:hidden" onClick={handleAsk}>
+            {/* Only shown on landscape phones — there the chat sits in a
+                drawer behind this button. On desktop the sidebar is always
+                visible and in portrait the chat is inline below the player,
+                so the button would be redundant in both. */}
+            <ChromeButton
+              label="Ask the professor"
+              className="lg:hidden portrait:max-lg:hidden"
+              onClick={handleAsk}
+            >
               <QuestionIcon className="h-6 w-6" />
             </ChromeButton>
 
             <ChromeButton
-              label={isFullscreen ? "Exit full screen" : "Full screen"}
+              label={anyFs ? "Exit full screen" : "Full screen"}
               onClick={toggleFullscreen}
             >
-              {isFullscreen ? <ExitFsIcon className="h-6 w-6" /> : <EnterFsIcon className="h-6 w-6" />}
+              {anyFs ? <ExitFsIcon className="h-6 w-6" /> : <EnterFsIcon className="h-6 w-6" />}
             </ChromeButton>
           </div>
         </div>

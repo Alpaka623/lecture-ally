@@ -85,14 +85,23 @@ export function LectureViewer({
         onOpenChat={openChat}
       />
 
+      {/* Phone-portrait live chat: the player above only takes the height its
+          slide needs, so the Q&A panel gets the rest of the screen instead of
+          hiding behind a drawer. */}
+      <section className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-panel lg:hidden landscape:max-lg:hidden">
+        <ChatPanel {...chatProps} />
+      </section>
+
       {/* Desktop live-chat sidebar — always visible, scrolls internally */}
       <aside className="hidden min-h-0 w-[360px] shrink-0 overflow-hidden rounded-xl border border-border bg-panel lg:block">
         <ChatPanel {...chatProps} />
       </aside>
 
-      {/* Mobile drawer — toggled from the player's Ask button */}
+      {/* Landscape-phone drawer — toggled from the player's Ask button. In
+          portrait the chat is inline (above) and on desktop it's a sidebar,
+          so the drawer is only for the remaining case. */}
       {chatOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden">
+        <div className="fixed inset-0 z-50 lg:hidden portrait:max-lg:hidden">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setChatOpen(false)} />
           <div className="absolute right-0 top-0 flex h-full w-[88%] max-w-[380px] flex-col border-l border-border bg-panel shadow-2xl">
             <ChatPanel {...chatProps} onClose={() => setChatOpen(false)} />

@@ -109,19 +109,54 @@ export function UploadForm() {
           <h2 className="label-mono text-xs text-text-muted">
             <span className="text-accent">02</span> — Upload Lecture
           </h2>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf,.lecture,.zip,application/zip"
+            className="hidden"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
+
+          {/* Phones have nothing to drag from, so a big drop zone is dead
+              space there — a compact tap-to-browse row does the job. */}
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            className="flex cursor-pointer items-center gap-3 rounded border-2 border-dashed border-accent/60 bg-panel px-4 py-3.5 transition-colors active:border-accent sm:hidden"
+          >
+            <span aria-hidden className={`text-2xl ${file ? "text-accent" : "text-text-faint"}`}>
+              📄
+            </span>
+            <div className="min-w-0 flex-1">
+              {file ? (
+                <>
+                  <p className="truncate text-sm font-medium text-text">{file.name}</p>
+                  <p className="text-xs text-text-muted">{formatSize(file.size)}</p>
+                </>
+              ) : (
+                <p className="text-sm text-text-muted">Tap to choose a PDF or .lecture export</p>
+              )}
+            </div>
+            {file && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setFile(null);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+                className="shrink-0 text-xs text-accent underline"
+              >
+                remove
+              </button>
+            )}
+          </div>
+
           <div
             onClick={() => fileInputRef.current?.click()}
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDrop}
-            className="flex min-h-[180px] flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded border-2 border-dashed border-accent/60 bg-panel px-4 py-6 text-center transition-colors hover:border-accent"
+            className="hidden min-h-[180px] flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded border-2 border-dashed border-accent/60 bg-panel px-4 py-6 text-center transition-colors hover:border-accent active:border-accent sm:flex"
           >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/pdf,.lecture,.zip,application/zip"
-              className="hidden"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
             {file ? (
               <>
                 <span aria-hidden className="text-2xl text-accent">
