@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 
 // Serves a media buffer with HTTP Range support (RFC 7233). <audio> elements
-// need this for two reasons: seeking within the file, and — less obviously —
-// discovering the duration of the TTS-produced WebM files, which carry no
-// duration metadata. The browser learns the length by fetching the tail of
-// the file; without Range support it can only probe what has downloaded so
-// far, which reports a too-short duration while the body is still streaming.
+// need this for seeking within the file, and — less obviously — for the
+// player's duration probe on WebM files that carry no duration metadata.
+// New files get the duration written into their header at synthesis time
+// (with a one-time backfill when first served), but unpatched files still
+// exist: the browser learns their length by fetching the tail of the file,
+// and without Range support it can only probe what has downloaded so far,
+// which reports a too-short duration while the body is still streaming.
 export function mediaResponse(
   request: Request,
   bytes: Uint8Array<ArrayBuffer>,

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { QnaEntry, WordTiming } from "@/lib/data/deckStore";
 import { geminiAuthHeaders, MISSING_API_KEY_CODE } from "@/lib/geminiSettings";
+import { slideAudioUrl } from "@/lib/http/slideUrls";
 
 // Error from our own API routes, carrying the machine-readable `code` so the
 // UI can distinguish "no API key configured" from generic failures.
@@ -139,7 +140,7 @@ export function useLecture(deckId: string, slideCount: number) {
   // togglePlayPause, because submitting a question stops (not pauses) the main
   // track — the professor stops talking so the answer can be heard.
   const loadAndPlayMain = useCallback(
-    (token: number, audioUrl: string) => {
+    (token: number, audioUrl: string, onPlaybackStarted?: () => void) => {
       const audio = new Audio(audioUrl);
       audio.volume = volumeRef.current;
       mainAudioRef.current = audio;
@@ -171,18 +172,25 @@ export function useLecture(deckId: string, slideCount: number) {
       const startPlayback = () => {
         if (token !== loadTokenRef.current) return;
         probingRef.current = false;
-        audio.play().catch(() => {});
+        audio
+          .play()
+          .then(() => onPlaybackStarted?.())
+          .catch(() => {});
       };
 
-      // The WebM files produced by the TTS service carry no duration
-      // metadata, so browsers report `Infinity` — which breaks both the
-      // seek bar and seeking itself. Seeking to an absurd timestamp makes
-      // the browser fetch the tail of the file (via Range requests) and
-      // compute the real duration before playback starts. `seeked` marks
-      // the seek — and the duration recompute — as settled; if the length
-      // is still unknown afterwards, probe again: a single probe that
-      // lands while the file is still downloading would otherwise report
-      // a too-short duration and never correct itself.
+      // The WebM files produced by the TTS service originally carried no
+      // duration metadata, so browsers reported `Infinity` — which breaks
+      // both the seek bar and seeking itself. The app now writes the
+      // duration into the header (at synthesis time, backfilled on first
+      // serve), so the finite-duration fast path above is the norm and
+      // this probe is the fallback for unpatched files: seeking to an
+      // absurd timestamp makes the browser fetch the tail of the file
+      // (via Range requests) and compute the real duration before
+      // playback starts. `seeked` marks the seek — and the duration
+      // recompute — as settled; if the length is still unknown
+      // afterwards, probe again: a single probe that lands while the
+      // file is still downloading would otherwise report a too-short
+      // duration and never correct itself.
       const ensureDurationAndPlay = () => {
         if (Number.isFinite(audio.duration) && audio.duration > 0) {
           setAudioDuration(audio.duration);
@@ -272,7 +280,41 @@ export function useLecture(deckId: string, slideCount: number) {
         setMissingApiKey(false);
         setScriptText(data.script);
         setCaptions(data.captions ?? []);
-        loadAndPlayMain(token, data.audioUrl);
+        loadAndPlayMain(token, data.audioUrl, () => {
+          // Warm the neighbouring slides' image cache only once this slide's
+          // narration is actually playing: rendering a slide PNG is CPU-heavy
+          // (pdfjs + PNG encode, in a worker thread), and starting it before
+          // playback runs means competing with the current slide's decode and
+          // with the click-time requests of a fast-forwarding user. If
+          // autoplay is blocked (play() rejects) this never fires — the next
+          // image then renders on demand, which the worker keeps cheap.
+          if (slideNumber < slideCount) {
+            fetch(`/api/decks/${deckId}/slides/${slideNumber + 1}/image`).catch(() => {});
+          }
+          if (slideNumber > 1) {
+            fetch(`/api/decks/${deckId}/slides/${slideNumber - 1}/image`).catch(() => {});
+          }
+        });
+
+        // Speculatively prepare the next slide's explanation while this one
+        // plays, so pressing Next starts instantly from the server-side
+        // cache. Fire-and-forget by design:
+        // - Not tied to this effect's AbortController — advancing to the
+        //   next slide is exactly when the prefetch must keep running, and
+        //   even if the user goes elsewhere the on-disk cache keeps the
+        //   completed result from being wasted.
+        // - Errors are ignored: without an API key the call fails with a
+        //   cheap 400, and any real failure resurfaces through the actual
+        //   request when the user navigates.
+        // - Concurrent duplicates (Strict Mode's double effect, navigation
+        //   while the prefetch is still generating) are coalesced into one
+        //   Gemini + TTS run server-side.
+        if (slideNumber < slideCount) {
+          fetch(`/api/decks/${deckId}/slides/${slideNumber + 1}/explain`, {
+            method: "POST",
+            headers: geminiAuthHeaders(),
+          }).catch(() => {});
+        }
       })
       .catch((err) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -283,17 +325,6 @@ export function useLecture(deckId: string, slideCount: number) {
         setScriptText(err instanceof Error ? err.message : "Failed to generate explanation");
         setNarrationState("error");
       });
-
-    // Warm the (cheap, local) slide-image cache for the neighbouring slides
-    // so Next/Previous shows the image immediately instead of waiting on
-    // on-demand PDF rendering. Deliberately not done for /explain — that
-    // calls the rate-limited Gemini + TTS APIs and shouldn't run speculatively.
-    if (slideNumber < slideCount) {
-      fetch(`/api/decks/${deckId}/slides/${slideNumber + 1}/image`, { signal: controller.signal }).catch(() => {});
-    }
-    if (slideNumber > 1) {
-      fetch(`/api/decks/${deckId}/slides/${slideNumber - 1}/image`, { signal: controller.signal }).catch(() => {});
-    }
 
     return () => {
       controller.abort();
@@ -349,14 +380,14 @@ export function useLecture(deckId: string, slideCount: number) {
   const togglePlayPause = useCallback(() => {
     if (narrationState === "answering") {
       stopQnaAudio();
-      loadAndPlayMain(loadTokenRef.current, `/api/decks/${deckId}/slides/${slideNumber}/audio`);
+      loadAndPlayMain(loadTokenRef.current, slideAudioUrl(deckId, slideNumber));
       return;
     }
 
     const audio = mainAudioRef.current;
     if (!audio) {
       // Stopped after a question: reload from cache (no Gemini call).
-      loadAndPlayMain(loadTokenRef.current, `/api/decks/${deckId}/slides/${slideNumber}/audio`);
+      loadAndPlayMain(loadTokenRef.current, slideAudioUrl(deckId, slideNumber));
       return;
     }
 

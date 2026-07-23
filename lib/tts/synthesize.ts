@@ -1,5 +1,6 @@
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import type { Language, WordTiming } from "@/lib/data/deckStore";
+import { injectWebmDuration } from "./webmDuration";
 
 export interface TtsResult {
   audio: Buffer;
@@ -77,7 +78,17 @@ export async function synthesizeSpeech(text: string, voice: string): Promise<Tts
       chunks.push(chunk as Buffer);
     }
 
-    return { audio: Buffer.concat(chunks), mimeType: "audio/webm", captions };
+    // The TTS service omits the WebM duration metadata (browsers then report
+    // Infinity, which forces a slow seek-probe before every playback). The
+    // word timings end at the last spoken word, which is close enough to
+    // write into the header ourselves.
+    const lastWord = captions.at(-1);
+    let audio: Buffer = Buffer.concat(chunks);
+    if (lastWord) {
+      audio = injectWebmDuration(audio, lastWord.start + lastWord.duration);
+    }
+
+    return { audio, mimeType: "audio/webm", captions };
   } finally {
     tts.close();
   }
