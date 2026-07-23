@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import {
   clearGeminiSettings,
-  hasCustomGeminiSettings,
   loadGeminiSettings,
   OPEN_SETTINGS_EVENT,
   saveGeminiSettings,
-  subscribeToGeminiSettings,
 } from "@/lib/geminiSettings";
 
 type TestState = { status: "idle" } | { status: "testing" } | { status: "ok" } | { status: "fail"; error: string };
@@ -18,15 +16,6 @@ export function ApiSettingsDialog() {
   const [baseUrl, setBaseUrl] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [test, setTest] = useState<TestState>({ status: "idle" });
-
-  // The "key configured" indicator is derived from localStorage, so it's read
-  // through useSyncExternalStore: SSR uses the false server snapshot (no
-  // hydration mismatch), and save/clear notify via the subscription.
-  const hasCustom = useSyncExternalStore(
-    subscribeToGeminiSettings,
-    hasCustomGeminiSettings,
-    () => false,
-  );
 
   // Other components (player error overlay, home banner) can request opening
   // the dialog by dispatching OPEN_SETTINGS_EVENT.
@@ -99,15 +88,9 @@ export function ApiSettingsDialog() {
         onClick={openDialog}
         title="API settings"
         aria-label="API settings"
-        className="relative rounded p-1 text-base text-text-muted transition-colors hover:text-text"
+        className="rounded p-1 text-base text-text-muted transition-colors hover:text-text"
       >
         <span aria-hidden>⚙️</span>
-        {hasCustom && (
-          <span
-            className="absolute right-0 top-0 h-2 w-2 rounded-full bg-accent"
-            title="Using your own API key"
-          />
-        )}
       </button>
 
       {open && (

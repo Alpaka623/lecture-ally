@@ -5,6 +5,27 @@ import { useState } from "react";
 
 type State = "idle" | "confirm" | "deleting" | "error";
 
+function TrashIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+    </svg>
+  );
+}
+
 /**
  * Two-step delete: first click arms the button ("Delete?"), second click
  * actually deletes. Blur disarms, so a stray click elsewhere never destroys
@@ -57,7 +78,15 @@ export function DeleteDeckButton({ deckId, title }: { deckId: string; title: str
             : "border-border text-text-muted hover:border-border-strong hover:text-text"
       }`}
     >
-      {state === "deleting" ? "Deleting…" : state === "confirm" ? "Delete?" : state === "error" ? "Retry?" : "🗑"}
+      {state === "deleting" ? (
+        "Deleting…"
+      ) : state === "confirm" ? (
+        "Delete?"
+      ) : state === "error" ? (
+        "Retry?"
+      ) : (
+        <TrashIcon className="block h-4 w-4" />
+      )}
     </button>
   );
 }

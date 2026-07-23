@@ -83,11 +83,13 @@ const QuestionIcon = (p: SVGProps<SVGSVGElement>) => (
 function ChromeButton({
   label,
   active,
+  className = "",
   onClick,
   children,
 }: {
   label: string;
   active?: boolean;
+  className?: string;
   onClick: () => void;
   children: React.ReactNode;
 }) {
@@ -100,7 +102,7 @@ function ChromeButton({
       onClick={onClick}
       className={`grid h-9 w-9 place-items-center rounded-full text-white/85 transition-all duration-150 hover:scale-110 hover:bg-white/10 hover:text-white active:scale-95 ${
         active ? "text-accent hover:text-accent" : ""
-      }`}
+      } ${className}`}
     >
       {children}
     </button>
@@ -359,7 +361,7 @@ export function LecturePlayer({
                   value={volume}
                   aria-label="Volume"
                   onChange={(e) => setVolume(Number(e.target.value))}
-                  className="ml-1 mr-2 h-1 w-20 cursor-pointer accent-[var(--color-accent)]"
+                  className="volume-slider ml-1 mr-2 h-4 w-20 cursor-pointer focus:outline-none"
                 />
               </div>
             </div>
@@ -375,7 +377,9 @@ export function LecturePlayer({
               <CcIcon className="h-6 w-6" />
             </ChromeButton>
 
-            <ChromeButton label="Ask the professor" onClick={handleAsk}>
+            {/* Only shown below lg — on desktop the chat sidebar is always
+                visible, so the button would be redundant there. */}
+            <ChromeButton label="Ask the professor" className="lg:hidden" onClick={handleAsk}>
               <QuestionIcon className="h-6 w-6" />
             </ChromeButton>
 
