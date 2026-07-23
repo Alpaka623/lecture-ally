@@ -1,4 +1,4 @@
-import { useEffect, useRef, type FormEvent, type KeyboardEvent, type RefObject, type SVGProps } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type RefObject, type SVGProps } from "react";
 import type { NarrationState } from "@/hooks/useLecture";
 import type { QnaEntry } from "@/lib/data/deckStore";
 
@@ -20,12 +20,61 @@ function TypingDots() {
   );
 }
 
+// Types an answer out at roughly speaking pace while its audio plays, so the
+// text appears together with the professor's voice instead of popping in all
+// at once. Gemini delivers short answers in a single burst, so this animation
+// is presentational — paced to match the TTS rate (~14 chars/s) rather than
+// the network. When the audio ends (or playback is interrupted), the rest of
+// the text shows immediately.
+const TYPING_INTERVAL_MS = 70;
+
+function StreamingAnswer({
+  text,
+  active,
+  onGrow,
+}: {
+  text: string;
+  active: boolean;
+  onGrow: () => void;
+}) {
+  const [revealed, setRevealed] = useState(active ? 0 : text.length);
+
+  useEffect(() => {
+    if (!active) {
+      setRevealed(text.length);
+      return;
+    }
+    const id = setInterval(() => {
+      setRevealed((count) => Math.min(count + 1, text.length));
+    }, TYPING_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [active, text.length]);
+
+  // Keep the growing bubble in view while it types.
+  useEffect(() => {
+    onGrow();
+  }, [revealed, onGrow]);
+
+  return (
+    <>
+      {text.slice(0, revealed)}
+      {active && revealed < text.length && (
+        <span
+          className="stream-cursor ml-0.5 inline-block h-3.5 w-[3px] translate-y-[3px] rounded-sm bg-text-muted"
+          aria-hidden="true"
+        />
+      )}
+    </>
+  );
+}
+
 export function ChatPanel({
   qna,
   question,
   setQuestion,
   onSubmit,
   narrationState,
+  speakingQnaId,
   onClose,
   textareaRef,
 }: {
@@ -34,12 +83,20 @@ export function ChatPanel({
   setQuestion: (value: string) => void;
   onSubmit: (question: string) => void;
   narrationState: NarrationState;
+  speakingQnaId?: string | null;
   onClose?: () => void;
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
 }) {
   const answering = narrationState === "answering";
   const canSend = question.trim().length > 0 && !answering && narrationState !== "loading";
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Instant (non-smooth) scroll as the typewriter grows the latest bubble —
+  // smooth re-scrolling 14 times a second would lag behind the text.
+  const handleGrow = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight });
+  }, []);
 
   // Keep the latest message / typing indicator in view, like a chat app.
   useEffect(() => {
@@ -110,7 +167,11 @@ export function ChatPanel({
               ) : (
                 !entry.failed && (
                   <div className="mr-auto w-fit max-w-[85%] rounded-2xl rounded-bl-sm border border-border bg-panel-alt px-3 py-2 text-sm text-text-muted">
-                    {entry.answer}
+                    <StreamingAnswer
+                      text={entry.answer}
+                      active={answering && entry.id === speakingQnaId}
+                      onGrow={handleGrow}
+                    />
                   </div>
                 )
               )}

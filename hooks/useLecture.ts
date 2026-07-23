@@ -14,6 +14,14 @@ class ApiError extends Error {
   }
 }
 
+// The /ask route answers with an NDJSON stream (one event per line): text
+// deltas while Gemini generates, then `done` with the audio once TTS finishes
+// (or `error` if something breaks mid-stream).
+type AskStreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "done"; qnaId: string; audioUrl: string }
+  | { type: "error"; error: string; code?: string };
+
 export type NarrationState =
   | "idle"
   | "loading"
@@ -29,6 +37,10 @@ export function useLecture(deckId: string, slideCount: number) {
   // Word-level timings for karaoke-style captions, matching the slide audio.
   const [captions, setCaptions] = useState<WordTiming[]>([]);
   const [qnaHistory, setQnaHistory] = useState<QnaEntry[]>([]);
+  // The Q&A entry whose answer audio is currently playing. The chat panel
+  // types that answer out at speaking pace while it plays, so text and voice
+  // appear together; historical entries render without animation.
+  const [speakingQnaId, setSpeakingQnaId] = useState<string | null>(null);
   const [audioTime, setAudioTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
   // True while the server reports that no API key was sent along — the player
@@ -92,6 +104,7 @@ export function useLecture(deckId: string, slideCount: number) {
     setScriptText("");
     setCaptions([]);
     setQnaHistory([]);
+    setSpeakingQnaId(null);
     setAudioTime(0);
     setAudioDuration(0);
     setMissingApiKey(false);
@@ -118,6 +131,7 @@ export function useLecture(deckId: string, slideCount: number) {
       audio.src = "";
       qnaAudioRef.current = null;
     }
+    setSpeakingQnaId(null);
   }, []);
 
   // (Re)load the slide's explanation audio and start it from the top. Shared by
@@ -362,9 +376,11 @@ export function useLecture(deckId: string, slideCount: number) {
       // Silence the professor immediately so the answer isn't talked over.
       stopMainAudio();
       setNarrationState("answering");
+      const token = loadTokenRef.current;
 
       // Optimistic, WhatsApp-style: the question shows up at once and the
-      // professor's slot shows a typing indicator until the answer lands.
+      // professor's slot shows a typing indicator until the first token of
+      // the streamed answer arrives — then the text grows in live.
       const tempId = `pending-${crypto.randomUUID()}`;
       setQnaHistory((prev) => [
         ...prev,
@@ -381,26 +397,75 @@ export function useLecture(deckId: string, slideCount: number) {
           const body = await res.json().catch(() => ({ error: "Unknown error" }));
           throw new ApiError(body.error ?? "Failed to generate answer", body.code);
         }
-        const data: { qnaId: string; answer: string; audioUrl: string } = await res.json();
+        if (!res.body) throw new ApiError("Failed to generate answer");
 
+        let qnaId = "";
+        let audioUrl = "";
+        const handleEvent = (event: AskStreamEvent) => {
+          if (event.type === "delta") {
+            setQnaHistory((prev) =>
+              prev.map((entry) =>
+                entry.id === tempId ? { ...entry, answer: entry.answer + event.text } : entry,
+              ),
+            );
+          } else if (event.type === "done") {
+            qnaId = event.qnaId;
+            audioUrl = event.audioUrl;
+          } else {
+            throw new ApiError(event.error, event.code);
+          }
+        };
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (line.trim()) handleEvent(JSON.parse(line) as AskStreamEvent);
+          }
+        }
+        if (buffer.trim()) handleEvent(JSON.parse(buffer) as AskStreamEvent);
+
+        // Promote the optimistic entry to the persisted one (drops `pending`,
+        // which removes the blinking cursor). If the user already navigated
+        // away, the history was reset and this map is a harmless no-op.
         setQnaHistory((prev) =>
           prev.map((entry) =>
             entry.id === tempId
               ? {
-                  id: data.qnaId,
+                  id: qnaId || entry.id,
                   question,
-                  answer: data.answer,
+                  answer: entry.answer,
                   askedAt: entry.askedAt,
                 }
               : entry,
           ),
         );
 
-        const audio = new Audio(data.audioUrl);
-        audio.volume = volumeRef.current;
-        qnaAudioRef.current = audio;
-        audio.onended = () => setNarrationState("paused");
-        audio.play().catch(() => {});
+        // Don't talk over the next slide's narration if the user moved on
+        // while the answer was still streaming in.
+        if (token !== loadTokenRef.current) return;
+
+        if (audioUrl) {
+          // Starts the answer's typewriter animation in the chat panel — the
+          // text types out while this audio plays.
+          if (qnaId) setSpeakingQnaId(qnaId);
+          const audio = new Audio(audioUrl);
+          audio.volume = volumeRef.current;
+          qnaAudioRef.current = audio;
+          audio.onended = () => {
+            setNarrationState("paused");
+            setSpeakingQnaId(null);
+          };
+          audio.play().catch(() => {});
+        } else {
+          setNarrationState("paused");
+        }
       } catch (err) {
         if (err instanceof ApiError && err.code === MISSING_API_KEY_CODE) {
           setMissingApiKey(true);
@@ -410,7 +475,7 @@ export function useLecture(deckId: string, slideCount: number) {
             entry.id === tempId ? { ...entry, pending: false, failed: true } : entry,
           ),
         );
-        setNarrationState("paused");
+        if (token === loadTokenRef.current) setNarrationState("paused");
       }
     },
     [deckId, slideNumber, stopQnaAudio, stopMainAudio],
@@ -433,6 +498,7 @@ export function useLecture(deckId: string, slideCount: number) {
     scriptText,
     captions,
     qnaHistory,
+    speakingQnaId,
     audioTime,
     audioDuration,
     volume,

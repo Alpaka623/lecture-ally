@@ -11,11 +11,17 @@ export interface AskQuestionOptions {
   request?: Request;
 }
 
-export async function askQuestion(opts: AskQuestionOptions): Promise<string> {
+// Yields the professor's answer as text deltas so the ask route can forward
+// each token to the chat UI while accumulating the full text for TTS and
+// persistence. Deliberately a regular async function (not an async
+// generator): getGenAI() and generateContentStream() run before the
+// generator is returned, so a missing API key or an immediate Gemini failure
+// still surfaces as a regular JSON error before any stream bytes go out.
+export async function streamAnswer(opts: AskQuestionOptions): Promise<AsyncGenerator<string>> {
   const languageLine = LANGUAGE_LINE[opts.language];
   const genai = getGenAI(opts.request);
 
-  const response = await genai.models.generateContent({
+  const stream = await genai.models.generateContentStream({
     model: GEMINI_MODEL,
     contents: {
       role: "user",
@@ -38,5 +44,9 @@ export async function askQuestion(opts: AskQuestionOptions): Promise<string> {
     },
   });
 
-  return response.text ?? "";
+  return (async function* () {
+    for await (const chunk of stream) {
+      if (chunk.text) yield chunk.text;
+    }
+  })();
 }

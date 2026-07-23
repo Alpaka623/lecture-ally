@@ -57,6 +57,21 @@ body {
   animation: typing-bounce 1.2s infinite ease-in-out;
 }
 
+/* Blinking caret at the end of an answer while it streams in token by token. */
+@keyframes cursor-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.stream-cursor {
+  animation: cursor-blink 1s step-end infinite;
+}
+
 /* Caption lines fade/rise in slightly when the karaoke captions advance to
    the next line. */
 @keyframes caption-in {

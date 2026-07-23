@@ -58,6 +58,7 @@ export function LectureViewer({
     setQuestion,
     onSubmit: lecture.submitQuestion,
     narrationState: lecture.narrationState,
+    speakingQnaId: lecture.speakingQnaId,
     textareaRef,
   };
 
