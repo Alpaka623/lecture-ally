@@ -13,12 +13,34 @@ export interface TtsResult {
   captions: WordTiming[];
 }
 
+// One neural voice per language, all verified against the live voice list of
+// Microsoft's read-aloud service (what msedge-tts connects to).
 const VOICE_BY_LANGUAGE: Record<Language, string> = {
   en: "en-US-AriaNeural",
   de: "de-DE-KatjaNeural",
   fr: "fr-FR-DeniseNeural",
   es: "es-ES-ElviraNeural",
   it: "it-IT-ElsaNeural",
+  ar: "ar-SA-ZariyahNeural",
+  zh: "zh-CN-XiaoxiaoNeural",
+  cs: "cs-CZ-VlastaNeural",
+  da: "da-DK-ChristelNeural",
+  nl: "nl-NL-ColetteNeural",
+  fi: "fi-FI-NooraNeural",
+  el: "el-GR-AthinaNeural",
+  hi: "hi-IN-SwaraNeural",
+  hu: "hu-HU-NoemiNeural",
+  id: "id-ID-GadisNeural",
+  ja: "ja-JP-NanamiNeural",
+  ko: "ko-KR-SunHiNeural",
+  nb: "nb-NO-PernilleNeural",
+  pl: "pl-PL-ZofiaNeural",
+  pt: "pt-BR-FranciscaNeural",
+  ro: "ro-RO-AlinaNeural",
+  ru: "ru-RU-SvetlanaNeural",
+  sv: "sv-SE-SofieNeural",
+  tr: "tr-TR-EmelNeural",
+  uk: "uk-UA-PolinaNeural",
 };
 
 export function voiceForLanguage(language: Language): string {

@@ -1,19 +1,39 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DeckMeta, Language } from "@/lib/data/types";
+import { FEATURED_LANGUAGES, LANGUAGES, LANGUAGE_INFO } from "@/lib/data/types";
 import { putDeck } from "@/lib/data/deckDb";
 import { getPdfPageCount } from "@/lib/pdf/clientRender";
 import { importDeckArchive } from "@/lib/data/deckArchiveClient";
 
-const LANGUAGES: { value: Language; native: string; english: string }[] = [
-  { value: "en", native: "English", english: "English" },
-  { value: "de", native: "Deutsch", english: "German" },
-  { value: "fr", native: "Français", english: "French" },
-  { value: "es", native: "Español", english: "Spanish" },
-  { value: "it", native: "Italiano", english: "Italian" },
-];
+function LanguageTile({
+  code,
+  selected,
+  onSelect,
+}: {
+  code: Language;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const info = LANGUAGE_INFO[code];
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`rounded border px-4 py-3 text-left transition-colors ${
+        selected
+          ? "border-accent bg-accent/10 text-accent"
+          : "border-border text-text hover:border-border-strong"
+      }`}
+    >
+      <div className="text-sm font-semibold">{info.native}</div>
+      <div className="text-xs text-text-muted">{info.english}</div>
+    </button>
+  );
+}
 
 function formatSize(bytes: number): string {
   return `${Math.round(bytes / 1024)} KB`;
@@ -29,10 +49,24 @@ export function UploadForm() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [language, setLanguage] = useState<Language>("en");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The selected language lives behind the "More" tile when it isn't one of
+  // the featured ones — the tile then doubles as its indicator.
+  const extendedSelected = !FEATURED_LANGUAGES.includes(language);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPickerOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pickerOpen]);
 
   function handleDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -86,22 +120,34 @@ export function UploadForm() {
           <h2 className="label-mono text-xs text-text-muted">
             <span className="text-accent">01</span> — Lecture Language
           </h2>
+          {/* Five featured languages plus a "More" tile — the full list would
+              swamp the start page, so it opens in a picker on demand. */}
           <div className="grid grid-cols-2 gap-2">
-            {LANGUAGES.map((lang) => (
-              <button
-                key={lang.value}
-                type="button"
-                onClick={() => setLanguage(lang.value)}
-                className={`rounded border px-4 py-3 text-left transition-colors ${
-                  language === lang.value
-                    ? "border-accent bg-accent/10 text-accent"
-                    : "border-border text-text hover:border-border-strong"
-                }`}
-              >
-                <div className="text-sm font-semibold">{lang.native}</div>
-                <div className="text-xs text-text-muted">{lang.english}</div>
-              </button>
+            {FEATURED_LANGUAGES.map((code) => (
+              <LanguageTile
+                key={code}
+                code={code}
+                selected={language === code}
+                onSelect={() => setLanguage(code)}
+              />
             ))}
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              aria-haspopup="dialog"
+              className={`rounded border px-4 py-3 text-left transition-colors ${
+                extendedSelected
+                  ? "border-accent bg-accent/10 text-accent"
+                  : "border-border text-text hover:border-border-strong"
+              }`}
+            >
+              <div className="text-sm font-semibold">More…</div>
+              <div className="text-xs text-text-muted">
+                {extendedSelected
+                  ? LANGUAGE_INFO[language].native
+                  : `+${LANGUAGES.length - FEATURED_LANGUAGES.length} languages`}
+              </div>
+            </button>
           </div>
           <input
             type="text"
@@ -206,6 +252,48 @@ export function UploadForm() {
       >
         {isUploading ? "Processing…" : "Start Lecture →"}
       </button>
+
+      {pickerOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setPickerOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Choose a language"
+            className="flex max-h-[90dvh] w-full max-w-md flex-col rounded-lg border border-border bg-panel p-5 shadow-xl sm:p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="label-mono text-xs text-text-muted">
+                <span className="text-accent">A–Z</span> — All {LANGUAGES.length} Languages
+              </h2>
+              <button
+                type="button"
+                onClick={() => setPickerOpen(false)}
+                aria-label="Close"
+                className="text-xs text-text-muted transition-colors hover:text-text"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3">
+              {LANGUAGES.map((code) => (
+                <LanguageTile
+                  key={code}
+                  code={code}
+                  selected={language === code}
+                  onSelect={() => {
+                    setLanguage(code);
+                    setPickerOpen(false);
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </form>
   );
 }
