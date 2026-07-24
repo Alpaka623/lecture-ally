@@ -172,9 +172,18 @@ export function LecturePlayer({
   // be mostly letterboxing (and the freed space goes to the chat below).
   // 16 / 9 is the placeholder until the first slide reports in.
   const [slideAspect, setSlideAspect] = useState("16 / 9");
-  // Initialize to the server-safe default; reconcile with the stored preference
-  // after mount so server and client HTML always match during hydration.
-  const [showCaptions, setShowCaptions] = useState(true);
+  // Captions preference lives in localStorage; read it lazily at mount (same
+  // pattern as the volume preference in useLecture). The player only mounts
+  // client-side — after the deck shell loads its cache — so this can never
+  // mismatch server-rendered HTML.
+  const [showCaptions, setShowCaptions] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      return localStorage.getItem("la-captions") !== "0";
+    } catch {
+      return true;
+    }
+  });
   // Chrome visibility for the YouTube-style idle hide (see effects below).
   const [chromeVisible, setChromeVisible] = useState(true);
   const chromeVisibleRef = useRef(chromeVisible);
@@ -191,14 +200,6 @@ export function LecturePlayer({
   // Set on pointerdown when that tap's only job is revealing the chrome, so
   // the follow-up click on the stage skips the play/pause toggle.
   const revealTapRef = useRef(false);
-
-  useEffect(() => {
-    try {
-      setShowCaptions(localStorage.getItem("la-captions") !== "0");
-    } catch {
-      /* ignore */
-    }
-  }, []);
 
   useEffect(() => {
     const onChange = () => setIsFullscreen(document.fullscreenElement === playerRef.current);

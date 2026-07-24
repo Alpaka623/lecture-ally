@@ -39,11 +39,13 @@ function StreamingAnswer({
 }) {
   const [revealed, setRevealed] = useState(active ? 0 : text.length);
 
+  // An inactive answer (finished or interrupted) shows the full text —
+  // derived from the props, no state sync needed. While active, the interval
+  // below grows `revealed` one character at a time.
+  const shown = active ? Math.min(revealed, text.length) : text.length;
+
   useEffect(() => {
-    if (!active) {
-      setRevealed(text.length);
-      return;
-    }
+    if (!active) return;
     const id = setInterval(() => {
       setRevealed((count) => Math.min(count + 1, text.length));
     }, TYPING_INTERVAL_MS);
@@ -53,12 +55,12 @@ function StreamingAnswer({
   // Keep the growing bubble in view while it types.
   useEffect(() => {
     onGrow();
-  }, [revealed, onGrow]);
+  }, [shown, onGrow]);
 
   return (
     <>
-      {text.slice(0, revealed)}
-      {active && revealed < text.length && (
+      {text.slice(0, shown)}
+      {active && shown < text.length && (
         <span
           className="stream-cursor ml-0.5 inline-block h-3.5 w-[3px] translate-y-[3px] rounded-sm bg-text-muted"
           aria-hidden="true"

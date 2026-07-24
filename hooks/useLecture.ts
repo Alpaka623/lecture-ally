@@ -214,12 +214,15 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
       audio.pause();
       audio.src = "";
       qnaAudioRef.current = null;
+      // speakingQnaId is only ever set together with the audio element (and
+      // cleared together in onended), so guarding it here — the same shape as
+      // stopMainAudio — covers every real case.
+      setSpeakingQnaId(null);
     }
     if (qnaAudioUrlRef.current) {
       URL.revokeObjectURL(qnaAudioUrlRef.current);
       qnaAudioUrlRef.current = null;
     }
-    setSpeakingQnaId(null);
   }, []);
 
   // (Re)load the slide's explanation audio and start it from the top. Shared by
