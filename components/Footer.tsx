@@ -18,15 +18,35 @@ export function Footer() {
           </span>
           <span>Lectures, narrated by AI.</span>
         </p>
-        <Link
-          href="/impressum"
-          className="label-mono group inline-flex w-fit items-center gap-1 text-xs text-text-muted transition-colors hover:text-accent"
-        >
-          Impressum
-          <span aria-hidden className="transition-transform duration-200 group-hover:translate-x-0.5">
-            →
-          </span>
-        </Link>
+        <nav className="flex items-center gap-4">
+          <Link
+            href="/datenschutz"
+            className="label-mono group inline-flex w-fit items-center gap-1 text-xs text-text-muted transition-colors hover:text-accent"
+          >
+            Privacy
+            <span aria-hidden className="transition-transform duration-200 group-hover:translate-x-0.5">
+              →
+            </span>
+          </Link>
+          <Link
+            href="/nutzungsbedingungen"
+            className="label-mono group inline-flex w-fit items-center gap-1 text-xs text-text-muted transition-colors hover:text-accent"
+          >
+            Terms
+            <span aria-hidden className="transition-transform duration-200 group-hover:translate-x-0.5">
+              →
+            </span>
+          </Link>
+          <Link
+            href="/impressum"
+            className="label-mono group inline-flex w-fit items-center gap-1 text-xs text-text-muted transition-colors hover:text-accent"
+          >
+            Impressum
+            <span aria-hidden className="transition-transform duration-200 group-hover:translate-x-0.5">
+              →
+            </span>
+          </Link>
+        </nav>
       </div>
     </footer>
   );
