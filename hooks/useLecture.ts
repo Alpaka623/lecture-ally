@@ -125,8 +125,10 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
 
   // The main slide narration and the Q&A answer are two independent audio
   // tracks. Sending a question *stops* the main track so the professor goes
-  // quiet while the answer plays; pressing play afterwards reloads it from
-  // cache. The Q&A track is transient and replaced on every question.
+  // quiet while the answer plays — but remembers where it stopped, so the
+  // seek bar stays put and pressing play afterwards resumes from that spot
+  // (reloaded from cache, no new LLM/TTS call). The Q&A track is transient
+  // and replaced on every question.
   const mainAudioRef = useRef<HTMLAudioElement | null>(null);
   const qnaAudioRef = useRef<HTMLAudioElement | null>(null);
   // Object URLs handed to the audio elements — revoked when the track stops so
@@ -135,6 +137,11 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
   const mainAudioUrlRef = useRef<string | null>(null);
   const qnaAudioUrlRef = useRef<string | null>(null);
   const mainAudioBlobRef = useRef<Blob | null>(null);
+  // Where the main track stopped mid-slide (currently only by a question
+  // interrupting it). Resuming picks up from here instead of restarting the
+  // slide; 0 means "start from the top". The seek bar keeps showing this
+  // position while the answer plays.
+  const resumePositionRef = useRef(0);
   const loadTokenRef = useRef(0);
   // True while the main track is parked at its end to measure the duration
   // (see loadAndPlayMain); position updates are ignored during that probe so
@@ -193,13 +200,23 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
   const stopMainAudio = useCallback(() => {
     const audio = mainAudioRef.current;
     if (audio) {
+      // Remember where the track stopped (e.g. when a question interrupts it)
+      // so resuming picks up mid-sentence. An ended track restarts from the
+      // top, matching what the play button does at the end of a slide.
+      const pos = audio.currentTime;
+      resumePositionRef.current = audio.ended || !Number.isFinite(pos) || pos > 1e9 ? 0 : pos;
+      // Detach the ref before clearing `src`: dropping the resource can fire
+      // a final `timeupdate` at position 0, which the element listeners guard
+      // against via `mainAudioRef.current !== audio` — and which must not
+      // reset the seek bar, frozen at the interrupted position.
+      mainAudioRef.current = null;
       audio.onended = null;
       audio.pause();
       audio.src = "";
-      mainAudioRef.current = null;
       probingRef.current = false;
-      setAudioTime(0);
-      setAudioDuration(0);
+      // audioTime/audioDuration deliberately untouched: the seek bar stays at
+      // the position where playback stopped. Slide changes reset both via the
+      // render-phase reset above.
     }
     if (mainAudioUrlRef.current) {
       URL.revokeObjectURL(mainAudioUrlRef.current);
@@ -225,12 +242,14 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
     }
   }, []);
 
-  // (Re)load the slide's explanation audio and start it from the top. Shared by
-  // the slide-change effect and the "resume after a question" path in
-  // togglePlayPause, because submitting a question stops (not pauses) the main
-  // track — the professor stops talking so the answer can be heard.
+  // (Re)load the slide's explanation audio and start playing — from the top
+  // for a fresh slide (`resumeAt` 0), or from where a question interrupted it
+  // when resuming via togglePlayPause. Shared by the slide-change effect and
+  // the "resume after a question" path, because submitting a question stops
+  // (not pauses) the main track — the professor stops talking so the answer
+  // can be heard.
   const loadAndPlayMain = useCallback(
-    (token: number, audioBlob: Blob, onPlaybackStarted?: () => void) => {
+    (token: number, audioBlob: Blob, resumeAt = 0, onPlaybackStarted?: () => void) => {
       // Revoke the previous track's object URL before minting a new one.
       if (mainAudioUrlRef.current) URL.revokeObjectURL(mainAudioUrlRef.current);
       const audioUrl = URL.createObjectURL(audioBlob);
@@ -241,13 +260,17 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
       mainAudioRef.current = audio;
       probingRef.current = true;
 
+      // The `mainAudioRef.current !== audio` guard keeps a discarded element
+      // (e.g. one whose `src` was just cleared by stopMainAudio) from pushing
+      // a stale position — notably a spurious 0 — into the frozen seek bar.
       audio.addEventListener("timeupdate", () => {
-        if (token !== loadTokenRef.current || probingRef.current) return;
+        if (token !== loadTokenRef.current || mainAudioRef.current !== audio || probingRef.current)
+          return;
         if (audio.currentTime > 1e9) return;
         setAudioTime(audio.currentTime);
       });
       audio.addEventListener("durationchange", () => {
-        if (token !== loadTokenRef.current) return;
+        if (token !== loadTokenRef.current || mainAudioRef.current !== audio) return;
         if (Number.isFinite(audio.duration) && audio.duration > 0) {
           setAudioDuration(audio.duration);
         }
@@ -261,6 +284,17 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
       const startPlayback = () => {
         if (token !== loadTokenRef.current) return;
         probingRef.current = false;
+        // Position the track before playing: at the top for a fresh slide
+        // (this also undoes the probe's seek to MAX_SAFE_INTEGER), or where
+        // a question interrupted it when resuming. The resume point is
+        // clamped to the real duration, which the probe fallback may have
+        // failed to resolve.
+        const target =
+          resumeAt > 0 && Number.isFinite(audio.duration) && resumeAt < audio.duration
+            ? resumeAt
+            : 0;
+        if (audio.currentTime !== target) audio.currentTime = target;
+        setAudioTime(target);
         audio
           .play()
           .then(() => onPlaybackStarted?.())
@@ -277,12 +311,14 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
           return;
         }
         let attempts = 0;
+        // resolveDuration leaves the element parked at MAX_SAFE_INTEGER;
+        // startPlayback seeks it back to the start position (or the resume
+        // point) once the probe is done.
         const resolveDuration = () => {
           audio.removeEventListener("seeked", resolveDuration);
           if (token !== loadTokenRef.current) return;
           if (Number.isFinite(audio.duration) && audio.duration > 0) {
             setAudioDuration(audio.duration);
-            audio.currentTime = 0;
             startPlayback();
             return;
           }
@@ -291,7 +327,6 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
             audio.currentTime = Number.MAX_SAFE_INTEGER;
             return;
           }
-          audio.currentTime = 0;
           startPlayback();
         };
         audio.addEventListener("seeked", resolveDuration);
@@ -314,6 +349,8 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
     const token = loadTokenRef.current;
 
     stopMainAudio();
+    // A new slide invalidates the previous track's saved resume point.
+    resumePositionRef.current = 0;
     stopQnaAudio();
 
     // Q&A history comes straight from the cache.
@@ -334,7 +371,7 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
         setScriptText(prepared.script);
         setCaptions(prepared.captions);
         mainAudioBlobRef.current = prepared.audio;
-        loadAndPlayMain(token, prepared.audio, () => {
+        loadAndPlayMain(token, prepared.audio, 0, () => {
           // Warm the neighbouring slides' render cache only once this slide's
           // narration is actually playing — rendering is CPU-heavy and we
           // don't want to compete with the current slide's decode. If autoplay
@@ -381,13 +418,26 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
     return () => cancelAnimationFrame(frame);
   }, [narrationState]);
 
-  const seekTo = useCallback((time: number) => {
-    const audio = mainAudioRef.current;
-    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
-    const target = Math.min(Math.max(time, 0), audio.duration);
-    audio.currentTime = target;
-    setAudioTime(target);
-  }, []);
+  const seekTo = useCallback(
+    (time: number) => {
+      const audio = mainAudioRef.current;
+      if (audio) {
+        if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+        const target = Math.min(Math.max(time, 0), audio.duration);
+        audio.currentTime = target;
+        setAudioTime(target);
+        return;
+      }
+      // The main track is stopped (a question interrupted it): the seek bar
+      // stays interactive and moves the saved resume point instead, so
+      // pressing play picks up from the new spot.
+      if (!mainAudioBlobRef.current || audioDuration <= 0) return;
+      const target = Math.min(Math.max(time, 0), audioDuration);
+      resumePositionRef.current = target;
+      setAudioTime(target);
+    },
+    [audioDuration],
+  );
 
   // The guards matter beyond deduplication: browser extensions can strip the
   // `disabled` attribute from the nav buttons before hydration, making them
@@ -411,11 +461,11 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
   // Play/Pause controls only the main narration. If an answer is still playing,
   // pressing it aborts that answer and (re)starts the main narration — the main
   // track was stopped when the question was sent, so resuming reloads it from
-  // the cached blob (no new LLM/TTS call).
+  // the cached blob (no new LLM/TTS call) at the position where it stopped.
   const togglePlayPause = useCallback(() => {
     const resumeFromCache = () => {
       const blob = mainAudioBlobRef.current;
-      if (blob) loadAndPlayMain(loadTokenRef.current, blob);
+      if (blob) loadAndPlayMain(loadTokenRef.current, blob, resumePositionRef.current);
     };
 
     if (narrationState === "answering") {
@@ -426,7 +476,7 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
 
     const audio = mainAudioRef.current;
     if (!audio) {
-      // Stopped after a question: reload from cache.
+      // Stopped after a question: reload from cache at the saved position.
       resumeFromCache();
       return;
     }
@@ -445,6 +495,8 @@ export function useLecture(deckId: string, slideCount: number, language: Languag
     async (question: string) => {
       stopQnaAudio();
       // Silence the professor immediately so the answer isn't talked over.
+      // The seek bar keeps showing the interrupted position; pressing play
+      // afterwards resumes the narration from there.
       stopMainAudio();
       setNarrationState("answering");
       const token = loadTokenRef.current;

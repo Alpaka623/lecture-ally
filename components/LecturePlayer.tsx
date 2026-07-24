@@ -18,8 +18,9 @@ const STATUS_LABEL: Record<NarrationState, string> = {
 };
 
 // No captions while "answering": the main track is stopped for the answer
-// audio, so its time is frozen at 0 and the script captions would show the
-// wrong words while the professor speaks the answer.
+// audio. Its time stays frozen at wherever the question interrupted it (the
+// seek bar shows that position), and highlighting that word while the
+// professor speaks the answer would be confusing.
 const CAPTION_STATES: NarrationState[] = ["narrating", "paused"];
 
 // YouTube-style idle hide: while the narration plays, the chrome fades out
