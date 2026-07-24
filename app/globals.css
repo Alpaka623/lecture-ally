@@ -157,6 +157,28 @@ body {
   }
 }
 
+/* Sections of the Impressum page fade/rise in with a slight stagger. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rise-in {
+  animation: rise-in 500ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise-in {
+    animation: none;
+  }
+}
+
 /* Caption lines fade/rise in slightly when the karaoke captions advance to
    the next line. */
 @keyframes caption-in {

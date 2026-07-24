@@ -4,6 +4,7 @@ import { DeckList } from "@/components/DeckList";
 import { Logo } from "@/components/Logo";
 import { ApiSettingsDialog } from "@/components/ApiSettingsDialog";
 import { ApiKeyBanner } from "@/components/ApiKeyBanner";
+import { Footer } from "@/components/Footer";
 
 export default async function Home() {
   const decks = await listDecks();
@@ -37,6 +38,8 @@ export default async function Home() {
           </div>
         )}
       </main>
+
+      <Footer />
     </>
   );
 }
