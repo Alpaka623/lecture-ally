@@ -13,10 +13,13 @@ export type Language =
   | "es"
   | "it"
   | "ar"
+  | "ca"
   | "zh"
+  | "hr"
   | "cs"
   | "da"
   | "nl"
+  | "et"
   | "fi"
   | "el"
   | "hi"
@@ -29,9 +32,11 @@ export type Language =
   | "pt"
   | "ro"
   | "ru"
+  | "sk"
   | "sv"
   | "tr"
-  | "uk";
+  | "uk"
+  | "vi";
 
 export const LANGUAGES: readonly Language[] = [
   "en",
@@ -40,10 +45,13 @@ export const LANGUAGES: readonly Language[] = [
   "es",
   "it",
   "ar",
+  "ca",
   "zh",
+  "hr",
   "cs",
   "da",
   "nl",
+  "et",
   "fi",
   "el",
   "hi",
@@ -56,9 +64,11 @@ export const LANGUAGES: readonly Language[] = [
   "pt",
   "ro",
   "ru",
+  "sk",
   "sv",
   "tr",
   "uk",
+  "vi",
 ];
 
 export function isLanguage(value: unknown): value is Language {
@@ -79,10 +89,13 @@ export const LANGUAGE_INFO: Record<Language, LanguageInfo> = {
   es: { native: "Español", english: "Spanish" },
   it: { native: "Italiano", english: "Italian" },
   ar: { native: "العربية", english: "Arabic" },
+  ca: { native: "Català", english: "Catalan" },
   zh: { native: "中文", english: "Chinese" },
+  hr: { native: "Hrvatski", english: "Croatian" },
   cs: { native: "Čeština", english: "Czech" },
   da: { native: "Dansk", english: "Danish" },
   nl: { native: "Nederlands", english: "Dutch" },
+  et: { native: "Eesti", english: "Estonian" },
   fi: { native: "Suomi", english: "Finnish" },
   el: { native: "Ελληνικά", english: "Greek" },
   hi: { native: "हिन्दी", english: "Hindi" },
@@ -95,9 +108,11 @@ export const LANGUAGE_INFO: Record<Language, LanguageInfo> = {
   pt: { native: "Português", english: "Portuguese" },
   ro: { native: "Română", english: "Romanian" },
   ru: { native: "Русский", english: "Russian" },
+  sk: { native: "Slovenčina", english: "Slovak" },
   sv: { native: "Svenska", english: "Swedish" },
   tr: { native: "Türkçe", english: "Turkish" },
   uk: { native: "Українська", english: "Ukrainian" },
+  vi: { native: "Tiếng Việt", english: "Vietnamese" },
 };
 
 /** Shown directly on the start page; everything else sits behind "More". */

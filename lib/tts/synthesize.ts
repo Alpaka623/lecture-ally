@@ -22,10 +22,13 @@ const VOICE_BY_LANGUAGE: Record<Language, string> = {
   es: "es-ES-ElviraNeural",
   it: "it-IT-ElsaNeural",
   ar: "ar-SA-ZariyahNeural",
+  ca: "ca-ES-JoanaNeural",
   zh: "zh-CN-XiaoxiaoNeural",
+  hr: "hr-HR-GabrijelaNeural",
   cs: "cs-CZ-VlastaNeural",
   da: "da-DK-ChristelNeural",
   nl: "nl-NL-ColetteNeural",
+  et: "et-EE-AnuNeural",
   fi: "fi-FI-NooraNeural",
   el: "el-GR-AthinaNeural",
   hi: "hi-IN-SwaraNeural",
@@ -38,9 +41,11 @@ const VOICE_BY_LANGUAGE: Record<Language, string> = {
   pt: "pt-BR-FranciscaNeural",
   ro: "ro-RO-AlinaNeural",
   ru: "ru-RU-SvetlanaNeural",
+  sk: "sk-SK-ViktoriaNeural",
   sv: "sv-SE-SofieNeural",
   tr: "tr-TR-EmelNeural",
   uk: "uk-UA-PolinaNeural",
+  vi: "vi-VN-HoaiMyNeural",
 };
 
 export function voiceForLanguage(language: Language): string {

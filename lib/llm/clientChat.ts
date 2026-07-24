@@ -24,10 +24,13 @@ export const LANGUAGE_LINE: Record<Language, string> = {
   es: "Responde únicamente en español.",
   it: "Rispondi esclusivamente in italiano.",
   ar: "أجب باللغة العربية فقط.",
+  ca: "Respon exclusivament en català.",
   zh: "请仅用中文回答。",
+  hr: "Odgovaraj isključivo na hrvatskom.",
   cs: "Odpovídej výhradně česky.",
   da: "Svar kun på dansk.",
   nl: "Antwoord uitsluitend in het Nederlands.",
+  et: "Vasta ainult eesti keeles.",
   fi: "Vastaa vain suomeksi.",
   el: "Απάντησε αποκλειστικά στα ελληνικά.",
   hi: "केवल हिन्दी में उत्तर दें।",
@@ -40,9 +43,11 @@ export const LANGUAGE_LINE: Record<Language, string> = {
   pt: "Responda apenas em português.",
   ro: "Răspunde exclusiv în română.",
   ru: "Отвечай исключительно на русском языке.",
+  sk: "Odpovedaj výhradne po slovensky.",
   sv: "Svara endast på svenska.",
   tr: "Yalnızca Türkçe yanıt ver.",
   uk: "Відповідай виключно українською мовою.",
+  vi: "Chỉ trả lời bằng tiếng Việt.",
 };
 
 export function professorSystemPrompt(language: Language): string {
