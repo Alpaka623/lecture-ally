@@ -58,10 +58,22 @@ Key handling:
   prompts to add one.
 - **Clear** in the settings dialog removes the key instantly.
 
+## Where lectures live (browser cache, no accounts)
+
+LectureAlly has **no server-side storage and no accounts**. A lecture lives only
+in *this* browser's cache (IndexedDB) — the uploaded PDF, rendered slides,
+narration scripts/audio and the Q&A history. The cache holds **one active
+lecture**: uploading or importing a new one replaces the previous. A cache
+survives a reload but is not a library — clearing site data (or switching
+device/browser) loses it. The **only permanent save is the `.lecture` export**
+below. The server is just two stateless relays (LLM + text-to-speech) that
+forward requests without storing anything — so it also runs on read-only
+serverless hosting (e.g. Vercel's free tier).
+
 ## Export & import lectures
 
-Every lecture in the library has an export button (⬇) that downloads a single
-`.lecture` file — a plain ZIP containing:
+The player's header has an export button (⬇) that downloads the active lecture
+as a single `.lecture` file — a plain ZIP containing:
 
 - `manifest.json` — format/version and the deck metadata (title, language, slide count)
 - `original.pdf` — the uploaded slides

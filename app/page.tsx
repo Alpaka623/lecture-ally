@@ -1,14 +1,11 @@
-import { listDecks } from "@/lib/data/deckStore";
 import { UploadForm } from "@/components/UploadForm";
-import { DeckList } from "@/components/DeckList";
+import { ResumeDeck } from "@/components/ResumeDeck";
 import { Logo } from "@/components/Logo";
 import { ApiSettingsDialog } from "@/components/ApiSettingsDialog";
 import { ApiKeyBanner } from "@/components/ApiKeyBanner";
 import { Footer } from "@/components/Footer";
 
-export default async function Home() {
-  const decks = await listDecks();
-
+export default function Home() {
   return (
     <>
       <header className="flex items-center justify-between border-b border-border px-4 py-4 sm:px-6">
@@ -31,12 +28,9 @@ export default async function Home() {
 
         <UploadForm />
 
-        {decks.length > 0 && (
-          <div className="flex w-full flex-col gap-3">
-            <h2 className="label-mono text-xs text-text-muted">Your Lectures</h2>
-            <DeckList decks={decks} />
-          </div>
-        )}
+        <div className="flex w-full flex-col gap-3">
+          <ResumeDeck />
+        </div>
       </main>
 
       <Footer />

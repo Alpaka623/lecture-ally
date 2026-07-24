@@ -2,7 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import type { Language } from "@/lib/data/deckStore";
+import type { DeckMeta, Language } from "@/lib/data/types";
+import { putDeck } from "@/lib/data/deckDb";
+import { getPdfPageCount } from "@/lib/pdf/clientRender";
+import { importDeckArchive } from "@/lib/data/deckArchiveClient";
 
 const LANGUAGES: { value: Language; native: string; english: string }[] = [
   { value: "en", native: "English", english: "English" },
@@ -37,6 +40,9 @@ export function UploadForm() {
     if (dropped) setFile(dropped);
   }
 
+  // Everything happens in the browser: a PDF is counted and cached in
+  // IndexedDB, a .lecture export is validated and unpacked there — nothing is
+  // uploaded to the server. The deck then opens from the cache.
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
@@ -46,26 +52,27 @@ export function UploadForm() {
       return;
     }
 
-    const archive = isDeckArchive(file);
-    const formData = new FormData();
-    formData.set("file", file);
-    if (!archive) {
-      formData.set("language", language);
-      formData.set("title", title);
-    }
-
     setIsUploading(true);
     try {
-      const res = await fetch(archive ? "/api/decks/import" : "/api/decks", {
-        method: "POST",
-        body: formData,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ error: "Upload failed" }));
-        throw new Error(body.error ?? "Upload failed");
+      let meta: DeckMeta;
+      if (isDeckArchive(file)) {
+        meta = await importDeckArchive(new Uint8Array(await file.arrayBuffer()));
+      } else {
+        if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+          throw new Error("File must be a PDF or a .lecture export.");
+        }
+        const slideCount = await getPdfPageCount(file);
+        if (slideCount < 1) throw new Error("This PDF has no pages.");
+        meta = {
+          id: crypto.randomUUID(),
+          title: title.trim() || file.name.replace(/\.pdf$/i, ""),
+          slideCount,
+          language,
+          createdAt: new Date().toISOString(),
+        };
+        await putDeck(meta, file);
       }
-      const { deckId } = await res.json();
-      router.push(`/decks/${deckId}`);
+      router.push(`/decks/${meta.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
       setIsUploading(false);

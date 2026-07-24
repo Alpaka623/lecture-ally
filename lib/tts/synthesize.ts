@@ -1,5 +1,5 @@
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
-import type { Language, WordTiming } from "@/lib/data/deckStore";
+import type { Language, WordTiming } from "@/lib/data/types";
 import { injectWebmDuration } from "./webmDuration";
 
 export interface TtsResult {

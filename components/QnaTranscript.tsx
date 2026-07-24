@@ -1,4 +1,4 @@
-import type { QnaEntry } from "@/lib/data/deckStore";
+import type { QnaEntry } from "@/lib/data/types";
 
 export function QnaTranscript({ qna }: { qna: QnaEntry[] }) {
   if (qna.length === 0) return null;

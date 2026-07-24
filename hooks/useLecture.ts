@@ -1,27 +1,26 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { QnaEntry, WordTiming } from "@/lib/data/deckStore";
-import { llmAuthHeaders, MISSING_API_KEY_CODE } from "@/lib/llmSettings";
-import { slideAudioUrl } from "@/lib/http/slideUrls";
-
-// Error from our own API routes, carrying the machine-readable `code` so the
-// UI can distinguish "no API key configured" from generic failures.
-class ApiError extends Error {
-  code?: string;
-  constructor(message: string, code?: string) {
-    super(message);
-    this.code = code;
-  }
-}
-
-// The /ask route answers with an NDJSON stream (one event per line): text
-// deltas while the model generates, then `done` with the audio once TTS
-// finishes (or `error` if something breaks mid-stream).
-type AskStreamEvent =
-  | { type: "delta"; text: string }
-  | { type: "done"; qnaId: string; audioUrl: string }
-  | { type: "error"; error: string; code?: string };
+import type { Language, QnaEntry, WordTiming } from "@/lib/data/types";
+import {
+  appendSlideQna,
+  getSlideAudioBlob,
+  getSlideQna,
+  getSlideScript,
+  saveQnaAudio,
+  saveSlideAudio,
+  saveSlideScript,
+} from "@/lib/data/deckDb";
+import { getOrRenderSlideImage } from "@/lib/pdf/slideImageClient";
+import {
+  chatCompletion,
+  chatCompletionStream,
+  LANGUAGE_LINE,
+  LlmError,
+  MISSING_API_KEY_CODE,
+  professorSystemPrompt,
+} from "@/lib/llm/clientChat";
+import { synthesize } from "@/lib/tts/ttsClient";
 
 export type NarrationState =
   | "idle"
@@ -31,7 +30,81 @@ export type NarrationState =
   | "answering"
   | "error";
 
-export function useLecture(deckId: string, slideCount: number) {
+interface PreparedExplanation {
+  script: string;
+  audio: Blob;
+  captions: WordTiming[];
+}
+
+// In-flight "prepare this slide's explanation" runs, keyed by deck + slide.
+// The player prefetches the next slide while the current one plays; if the
+// user advances before that prefetch settles, the navigation's real
+// preparation must join the running one instead of starting a second LLM +
+// TTS run (double cost, and two writers racing the same cache entry). React
+// Strict Mode's dev-only double effect lands here for the same reason.
+const inflight = new Map<string, Promise<PreparedExplanation>>();
+
+function prepareExplanation(
+  deckId: string,
+  slideNumber: number,
+  slideCount: number,
+  language: Language,
+): Promise<PreparedExplanation> {
+  const key = `${deckId}:${slideNumber}`;
+  const existing = inflight.get(key);
+  if (existing) return existing;
+
+  const promise = doPrepare(deckId, slideNumber, slideCount, language).finally(() => {
+    inflight.delete(key);
+  });
+  inflight.set(key, promise);
+  return promise;
+}
+
+// The client-side equivalent of the old /explain route: reuse the cached
+// script/audio when present, otherwise render the slide, ask the model, and
+// synthesize the narration — caching each artefact in IndexedDB as it goes.
+async function doPrepare(
+  deckId: string,
+  slideNumber: number,
+  slideCount: number,
+  language: Language,
+): Promise<PreparedExplanation> {
+  let script = await getSlideScript(deckId, slideNumber);
+  let audio = await getSlideAudioBlob(deckId, slideNumber);
+
+  if (!script) {
+    const imagePng = await getOrRenderSlideImage(deckId, slideNumber);
+    const previous = slideNumber > 1 ? await getSlideScript(deckId, slideNumber - 1) : null;
+    const text = await chatCompletion(
+      {
+        system: professorSystemPrompt(language),
+        text: `Slide ${slideNumber} of ${slideCount}.${
+          previous ? ` Previous slide covered: ${previous.text}` : ""
+        } Explain this slide to the student.`,
+        imagePng,
+      },
+      { maxTokens: 500 },
+    );
+    script = { text, generatedAt: new Date().toISOString() };
+    await saveSlideScript(deckId, slideNumber, script);
+  }
+
+  // Captions (word timings) are tied to the audio, so synthesize whenever
+  // either is missing. Audio and captions always come from the same synthesis
+  // run, so they can't drift apart.
+  if (!audio || !script.captions?.length) {
+    const result = await synthesize(script.text, language);
+    audio = result.audio;
+    await saveSlideAudio(deckId, slideNumber, audio);
+    script = { ...script, captions: result.captions };
+    await saveSlideScript(deckId, slideNumber, script);
+  }
+
+  return { script: script.text, audio, captions: script.captions ?? [] };
+}
+
+export function useLecture(deckId: string, slideCount: number, language: Language) {
   const [slideIndex, setSlideIndex] = useState(0);
   const [narrationState, setNarrationState] = useState<NarrationState>("loading");
   const [scriptText, setScriptText] = useState("");
@@ -44,8 +117,8 @@ export function useLecture(deckId: string, slideCount: number) {
   const [speakingQnaId, setSpeakingQnaId] = useState<string | null>(null);
   const [audioTime, setAudioTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
-  // True while the server reports that no API key was sent along — the player
-  // shows an "add your key" overlay instead of a plain error.
+  // True when no API key was configured — the player shows an "add your key"
+  // overlay instead of a plain error.
   const [missingApiKey, setMissingApiKey] = useState(false);
   // Bumped by retry() to re-run the slide-load effect after settings change.
   const [reloadToken, setReloadToken] = useState(0);
@@ -56,6 +129,12 @@ export function useLecture(deckId: string, slideCount: number) {
   // cache. The Q&A track is transient and replaced on every question.
   const mainAudioRef = useRef<HTMLAudioElement | null>(null);
   const qnaAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Object URLs handed to the audio elements — revoked when the track stops so
+  // the cached blobs don't leak. mainAudioBlobRef keeps the current slide's
+  // audio so resuming after a question needs no IndexedDB round trip.
+  const mainAudioUrlRef = useRef<string | null>(null);
+  const qnaAudioUrlRef = useRef<string | null>(null);
+  const mainAudioBlobRef = useRef<Blob | null>(null);
   const loadTokenRef = useRef(0);
   // True while the main track is parked at its end to measure the duration
   // (see loadAndPlayMain); position updates are ignored during that probe so
@@ -122,6 +201,10 @@ export function useLecture(deckId: string, slideCount: number) {
       setAudioTime(0);
       setAudioDuration(0);
     }
+    if (mainAudioUrlRef.current) {
+      URL.revokeObjectURL(mainAudioUrlRef.current);
+      mainAudioUrlRef.current = null;
+    }
   }, []);
 
   const stopQnaAudio = useCallback(() => {
@@ -132,6 +215,10 @@ export function useLecture(deckId: string, slideCount: number) {
       audio.src = "";
       qnaAudioRef.current = null;
     }
+    if (qnaAudioUrlRef.current) {
+      URL.revokeObjectURL(qnaAudioUrlRef.current);
+      qnaAudioUrlRef.current = null;
+    }
     setSpeakingQnaId(null);
   }, []);
 
@@ -140,7 +227,12 @@ export function useLecture(deckId: string, slideCount: number) {
   // togglePlayPause, because submitting a question stops (not pauses) the main
   // track — the professor stops talking so the answer can be heard.
   const loadAndPlayMain = useCallback(
-    (token: number, audioUrl: string, onPlaybackStarted?: () => void) => {
+    (token: number, audioBlob: Blob, onPlaybackStarted?: () => void) => {
+      // Revoke the previous track's object URL before minting a new one.
+      if (mainAudioUrlRef.current) URL.revokeObjectURL(mainAudioUrlRef.current);
+      const audioUrl = URL.createObjectURL(audioBlob);
+      mainAudioUrlRef.current = audioUrl;
+
       const audio = new Audio(audioUrl);
       audio.volume = volumeRef.current;
       mainAudioRef.current = audio;
@@ -148,15 +240,9 @@ export function useLecture(deckId: string, slideCount: number) {
 
       audio.addEventListener("timeupdate", () => {
         if (token !== loadTokenRef.current || probingRef.current) return;
-        // Values above the sentinel are the duration probe below, not real
-        // progress.
         if (audio.currentTime > 1e9) return;
         setAudioTime(audio.currentTime);
       });
-      // The TTS WebMs carry no duration metadata, so browsers can (re)discover
-      // the true length later on — once the file is fully buffered or after a
-      // seek near the end. Mirror every such discovery into the UI so the
-      // displayed duration self-heals even if the probe below came up short.
       audio.addEventListener("durationchange", () => {
         if (token !== loadTokenRef.current) return;
         if (Number.isFinite(audio.duration) && audio.duration > 0) {
@@ -178,19 +264,9 @@ export function useLecture(deckId: string, slideCount: number) {
           .catch(() => {});
       };
 
-      // The WebM files produced by the TTS service originally carried no
-      // duration metadata, so browsers reported `Infinity` — which breaks
-      // both the seek bar and seeking itself. The app now writes the
-      // duration into the header (at synthesis time, backfilled on first
-      // serve), so the finite-duration fast path above is the norm and
-      // this probe is the fallback for unpatched files: seeking to an
-      // absurd timestamp makes the browser fetch the tail of the file
-      // (via Range requests) and compute the real duration before
-      // playback starts. `seeked` marks the seek — and the duration
-      // recompute — as settled; if the length is still unknown
-      // afterwards, probe again: a single probe that lands while the
-      // file is still downloading would otherwise report a too-short
-      // duration and never correct itself.
+      // The TTS relay writes the duration into the WebM header, so a blob URL
+      // reports a finite length immediately and this fast path is the norm;
+      // the multi-seek probe below is the fallback for any unpatched file.
       const ensureDurationAndPlay = () => {
         if (Number.isFinite(audio.duration) && audio.duration > 0) {
           setAudioDuration(audio.duration);
@@ -212,8 +288,6 @@ export function useLecture(deckId: string, slideCount: number) {
             audio.currentTime = Number.MAX_SAFE_INTEGER;
             return;
           }
-          // Probing exhausted — play anyway; the duration fills in via the
-          // `durationchange` listener once the browser knows it.
           audio.currentTime = 0;
           startPlayback();
         };
@@ -235,102 +309,59 @@ export function useLecture(deckId: string, slideCount: number) {
   useEffect(() => {
     loadTokenRef.current += 1;
     const token = loadTokenRef.current;
-    // Aborting on cleanup is what actually matters here: React (Strict Mode,
-    // dev only) invokes this effect twice per slide change, and without an
-    // abort the first invocation's requests keep running — racing the second
-    // invocation's requests against the same server-side cache files and
-    // occasionally corrupting a JSON response. It also cancels wasted
-    // LLM/TTS calls when the user navigates again before a slide finishes
-    // generating.
-    const controller = new AbortController();
 
     stopMainAudio();
     stopQnaAudio();
 
-    fetch(`/api/decks/${deckId}/slides/${slideNumber}/qna`, { signal: controller.signal })
-      .then((res) => res.json())
-      .then((data) => {
+    // Q&A history comes straight from the cache.
+    getSlideQna(deckId, slideNumber)
+      .then((list) => {
         if (token !== loadTokenRef.current) return;
-        setQnaHistory(data.qna ?? []);
+        setQnaHistory(list);
       })
-      .catch((err) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
+      .catch(() => {
         if (token !== loadTokenRef.current) return;
         setQnaHistory([]);
       });
 
-    fetch(`/api/decks/${deckId}/slides/${slideNumber}/explain`, {
-      method: "POST",
-      headers: llmAuthHeaders(),
-      signal: controller.signal,
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({ error: "Unknown error" }));
-          throw new ApiError(body.error ?? "Failed to generate explanation", body.code);
-        }
-        return res.json() as Promise<{
-          script: string;
-          audioUrl: string;
-          captions?: WordTiming[];
-        }>;
-      })
-      .then((data) => {
+    prepareExplanation(deckId, slideNumber, slideCount, language)
+      .then((prepared) => {
         if (token !== loadTokenRef.current) return;
         setMissingApiKey(false);
-        setScriptText(data.script);
-        setCaptions(data.captions ?? []);
-        loadAndPlayMain(token, data.audioUrl, () => {
-          // Warm the neighbouring slides' image cache only once this slide's
-          // narration is actually playing: rendering a slide PNG is CPU-heavy
-          // (pdfjs + PNG encode, in a worker thread), and starting it before
-          // playback runs means competing with the current slide's decode and
-          // with the click-time requests of a fast-forwarding user. If
-          // autoplay is blocked (play() rejects) this never fires — the next
-          // image then renders on demand, which the worker keeps cheap.
+        setScriptText(prepared.script);
+        setCaptions(prepared.captions);
+        mainAudioBlobRef.current = prepared.audio;
+        loadAndPlayMain(token, prepared.audio, () => {
+          // Warm the neighbouring slides' render cache only once this slide's
+          // narration is actually playing — rendering is CPU-heavy and we
+          // don't want to compete with the current slide's decode. If autoplay
+          // is blocked this never fires; the neighbour renders on demand.
           if (slideNumber < slideCount) {
-            fetch(`/api/decks/${deckId}/slides/${slideNumber + 1}/image`).catch(() => {});
+            getOrRenderSlideImage(deckId, slideNumber + 1).catch(() => {});
           }
           if (slideNumber > 1) {
-            fetch(`/api/decks/${deckId}/slides/${slideNumber - 1}/image`).catch(() => {});
+            getOrRenderSlideImage(deckId, slideNumber - 1).catch(() => {});
           }
         });
 
         // Speculatively prepare the next slide's explanation while this one
-        // plays, so pressing Next starts instantly from the server-side
-        // cache. Fire-and-forget by design:
-        // - Not tied to this effect's AbortController — advancing to the
-        //   next slide is exactly when the prefetch must keep running, and
-        //   even if the user goes elsewhere the on-disk cache keeps the
-        //   completed result from being wasted.
-        // - Errors are ignored: without an API key the call fails with a
-        //   cheap 400, and any real failure resurfaces through the actual
-        //   request when the user navigates.
-        // - Concurrent duplicates (Strict Mode's double effect, navigation
-        //   while the prefetch is still generating) are coalesced into one
-        //   LLM + TTS run server-side.
+        // plays, so pressing Next starts instantly from the cache. Fire-and-
+        // forget: errors resurface through the real request, and a completed
+        // prefetch is cached even if the user navigates elsewhere.
         if (slideNumber < slideCount) {
-          fetch(`/api/decks/${deckId}/slides/${slideNumber + 1}/explain`, {
-            method: "POST",
-            headers: llmAuthHeaders(),
-          }).catch(() => {});
+          prepareExplanation(deckId, slideNumber + 1, slideCount, language).catch(() => {});
         }
       })
       .catch((err) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
         if (token !== loadTokenRef.current) return;
-        if (err instanceof ApiError && err.code === MISSING_API_KEY_CODE) {
+        if (err instanceof LlmError && err.code === MISSING_API_KEY_CODE) {
           setMissingApiKey(true);
         }
         setScriptText(err instanceof Error ? err.message : "Failed to generate explanation");
         setNarrationState("error");
       });
-
-    return () => {
-      controller.abort();
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deckId, slideNumber, loadAndPlayMain, reloadToken]);
+  }, [deckId, slideNumber, slideCount, language, loadAndPlayMain, reloadToken]);
 
   // `timeupdate` only fires ~4 times a second, which makes the seek bar
   // stutter; while the narration runs, read the position every frame.
@@ -376,18 +407,24 @@ export function useLecture(deckId: string, slideCount: number) {
 
   // Play/Pause controls only the main narration. If an answer is still playing,
   // pressing it aborts that answer and (re)starts the main narration — the main
-  // track was stopped when the question was sent, so resuming reloads it.
+  // track was stopped when the question was sent, so resuming reloads it from
+  // the cached blob (no new LLM/TTS call).
   const togglePlayPause = useCallback(() => {
+    const resumeFromCache = () => {
+      const blob = mainAudioBlobRef.current;
+      if (blob) loadAndPlayMain(loadTokenRef.current, blob);
+    };
+
     if (narrationState === "answering") {
       stopQnaAudio();
-      loadAndPlayMain(loadTokenRef.current, slideAudioUrl(deckId, slideNumber));
+      resumeFromCache();
       return;
     }
 
     const audio = mainAudioRef.current;
     if (!audio) {
-      // Stopped after a question: reload from cache (no LLM call).
-      loadAndPlayMain(loadTokenRef.current, slideAudioUrl(deckId, slideNumber));
+      // Stopped after a question: reload from cache.
+      resumeFromCache();
       return;
     }
 
@@ -399,7 +436,7 @@ export function useLecture(deckId: string, slideCount: number) {
       audio.pause();
       setNarrationState("paused");
     }
-  }, [narrationState, stopQnaAudio, loadAndPlayMain, deckId, slideNumber]);
+  }, [narrationState, stopQnaAudio, loadAndPlayMain]);
 
   const submitQuestion = useCallback(
     async (question: string) => {
@@ -410,8 +447,8 @@ export function useLecture(deckId: string, slideCount: number) {
       const token = loadTokenRef.current;
 
       // Optimistic, WhatsApp-style: the question shows up at once and the
-      // professor's slot shows a typing indicator until the first token of
-      // the streamed answer arrives — then the text grows in live.
+      // professor's slot shows a typing indicator until the first token of the
+      // streamed answer arrives — then the text grows in live.
       const tempId = `pending-${crypto.randomUUID()}`;
       setQnaHistory((prev) => [
         ...prev,
@@ -419,48 +456,40 @@ export function useLecture(deckId: string, slideCount: number) {
       ]);
 
       try {
-        const res = await fetch(`/api/decks/${deckId}/slides/${slideNumber}/ask`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...llmAuthHeaders() },
-          body: JSON.stringify({ question }),
+        const imagePng = await getOrRenderSlideImage(deckId, slideNumber);
+        const script = await getSlideScript(deckId, slideNumber);
+
+        // chatCompletionStream throws (rather than yielding) on an immediate
+        // failure, so a missing key surfaces as a JSON-style error before any
+        // tokens are shown.
+        const deltas = await chatCompletionStream(
+          {
+            system: `You are the same warm, engaging university professor who just narrated this slide. A student is now asking a follow-up question. ${LANGUAGE_LINE[language]} Answer conversationally and briefly, staying consistent with what you already said. No markdown.`,
+            text: `This is slide ${slideNumber} of ${slideCount}. What you already narrated for this slide: "${script?.text ?? ""}"\n\nStudent's question: ${question}`,
+            imagePng,
+          },
+          { maxTokens: 400 },
+        );
+
+        let answer = "";
+        for await (const text of deltas) {
+          answer += text;
+          setQnaHistory((prev) =>
+            prev.map((entry) =>
+              entry.id === tempId ? { ...entry, answer: entry.answer + text } : entry,
+            ),
+          );
+        }
+
+        const qnaId = crypto.randomUUID();
+        const { audio } = await synthesize(answer, language);
+        await saveQnaAudio(deckId, slideNumber, qnaId, audio);
+        await appendSlideQna(deckId, slideNumber, {
+          id: qnaId,
+          question,
+          answer,
+          askedAt: new Date().toISOString(),
         });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({ error: "Unknown error" }));
-          throw new ApiError(body.error ?? "Failed to generate answer", body.code);
-        }
-        if (!res.body) throw new ApiError("Failed to generate answer");
-
-        let qnaId = "";
-        let audioUrl = "";
-        const handleEvent = (event: AskStreamEvent) => {
-          if (event.type === "delta") {
-            setQnaHistory((prev) =>
-              prev.map((entry) =>
-                entry.id === tempId ? { ...entry, answer: entry.answer + event.text } : entry,
-              ),
-            );
-          } else if (event.type === "done") {
-            qnaId = event.qnaId;
-            audioUrl = event.audioUrl;
-          } else {
-            throw new ApiError(event.error, event.code);
-          }
-        };
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-          for (const line of lines) {
-            if (line.trim()) handleEvent(JSON.parse(line) as AskStreamEvent);
-          }
-        }
-        if (buffer.trim()) handleEvent(JSON.parse(buffer) as AskStreamEvent);
 
         // Promote the optimistic entry to the persisted one (drops `pending`,
         // which removes the blinking cursor). If the user already navigated
@@ -468,12 +497,7 @@ export function useLecture(deckId: string, slideCount: number) {
         setQnaHistory((prev) =>
           prev.map((entry) =>
             entry.id === tempId
-              ? {
-                  id: qnaId || entry.id,
-                  question,
-                  answer: entry.answer,
-                  askedAt: entry.askedAt,
-                }
+              ? { id: qnaId, question, answer: entry.answer, askedAt: entry.askedAt }
               : entry,
           ),
         );
@@ -482,23 +506,22 @@ export function useLecture(deckId: string, slideCount: number) {
         // while the answer was still streaming in.
         if (token !== loadTokenRef.current) return;
 
-        if (audioUrl) {
-          // Starts the answer's typewriter animation in the chat panel — the
-          // text types out while this audio plays.
-          if (qnaId) setSpeakingQnaId(qnaId);
-          const audio = new Audio(audioUrl);
-          audio.volume = volumeRef.current;
-          qnaAudioRef.current = audio;
-          audio.onended = () => {
-            setNarrationState("paused");
-            setSpeakingQnaId(null);
-          };
-          audio.play().catch(() => {});
-        } else {
+        // Starts the answer's typewriter animation in the chat panel — the
+        // text types out while this audio plays.
+        setSpeakingQnaId(qnaId);
+        if (qnaAudioUrlRef.current) URL.revokeObjectURL(qnaAudioUrlRef.current);
+        const url = URL.createObjectURL(audio);
+        qnaAudioUrlRef.current = url;
+        const audioEl = new Audio(url);
+        audioEl.volume = volumeRef.current;
+        qnaAudioRef.current = audioEl;
+        audioEl.onended = () => {
           setNarrationState("paused");
-        }
+          setSpeakingQnaId(null);
+        };
+        audioEl.play().catch(() => {});
       } catch (err) {
-        if (err instanceof ApiError && err.code === MISSING_API_KEY_CODE) {
+        if (err instanceof LlmError && err.code === MISSING_API_KEY_CODE) {
           setMissingApiKey(true);
         }
         setQnaHistory((prev) =>
@@ -509,7 +532,7 @@ export function useLecture(deckId: string, slideCount: number) {
         if (token === loadTokenRef.current) setNarrationState("paused");
       }
     },
-    [deckId, slideNumber, stopQnaAudio, stopMainAudio],
+    [deckId, slideNumber, slideCount, language, stopQnaAudio, stopMainAudio],
   );
 
   // Re-run the current slide's generation — used after the user adds their
@@ -520,6 +543,14 @@ export function useLecture(deckId: string, slideCount: number) {
     setScriptText("");
     setCaptions([]);
     setReloadToken((t) => t + 1);
+  }, []);
+
+  // Revoke any live object URLs on unmount so cached blobs don't leak.
+  useEffect(() => {
+    return () => {
+      if (mainAudioUrlRef.current) URL.revokeObjectURL(mainAudioUrlRef.current);
+      if (qnaAudioUrlRef.current) URL.revokeObjectURL(qnaAudioUrlRef.current);
+    };
   }, []);
 
   return {

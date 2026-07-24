@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type RefObject, type SVGProps } from "react";
 import type { NarrationState } from "@/hooks/useLecture";
-import type { QnaEntry } from "@/lib/data/deckStore";
+import type { QnaEntry } from "@/lib/data/types";
 
 function SendIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -201,6 +201,11 @@ export function ChatPanel({
             <SendIcon className="h-5 w-5 translate-x-px" />
           </button>
         </div>
+        {/* AI-transparency notice (EU AI Act Art. 50): make clear the narration
+            and answers come from an AI and can be wrong. */}
+        <p className="px-1 text-center text-[11px] leading-snug text-text-faint">
+          Answers are AI-generated and may be inaccurate.
+        </p>
       </form>
     </div>
   );

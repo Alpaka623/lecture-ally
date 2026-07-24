@@ -3,17 +3,20 @@
 import { useEffect, useRef, useState } from "react";
 import { useLecture } from "@/hooks/useLecture";
 import { LLM_SETTINGS_CHANGED_EVENT } from "@/lib/llmSettings";
+import type { Language } from "@/lib/data/types";
 import { LecturePlayer } from "./LecturePlayer";
 import { ChatPanel } from "./ChatPanel";
 
 export function LectureViewer({
   deckId,
   slideCount,
+  language,
 }: {
   deckId: string;
   slideCount: number;
+  language: Language;
 }) {
-  const lecture = useLecture(deckId, slideCount);
+  const lecture = useLecture(deckId, slideCount, language);
   const [chatOpen, setChatOpen] = useState(false);
   const [question, setQuestion] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { WordTiming } from "@/lib/data/deckStore";
+import type { WordTiming } from "@/lib/data/types";
 
 // Rough line width (in characters) before wrapping to the next caption line —
 // keeps lines about as wide as YouTube's auto-captions.

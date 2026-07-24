@@ -157,6 +157,95 @@ body {
   }
 }
 
+/* Long-form legal prose (Datenschutzerklärung): the privacy text is rendered
+   from an HTML string, so its elements are styled here rather than with
+   per-element Tailwind classes. Mirrors the Impressum's calm, bordered look. */
+.legal-prose h2 {
+  margin-top: 2.5rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--color-border);
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+.legal-prose > h2:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.legal-prose h3 {
+  margin-top: 1.75rem;
+  font-size: 0.8rem;
+  font-family: var(--font-geist-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.legal-prose p {
+  margin-top: 0.9rem;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--color-text-muted);
+}
+
+.legal-prose ul {
+  margin-top: 0.9rem;
+  padding-left: 1.1rem;
+  list-style: disc;
+}
+
+.legal-prose li {
+  margin-top: 0.4rem;
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: var(--color-text-muted);
+}
+
+.legal-prose li strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.legal-prose a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  overflow-wrap: anywhere;
+}
+
+/* The auto-generated table of contents and the generator seal are quieter. */
+.legal-prose ul.index {
+  list-style: none;
+  padding-left: 0;
+  columns: 2;
+  column-gap: 1.5rem;
+}
+
+.legal-prose ul.index li {
+  margin-top: 0.25rem;
+}
+
+.legal-prose .seal {
+  margin-top: 2.5rem;
+  font-size: 0.7rem;
+}
+
+.legal-prose .seal a {
+  color: var(--color-text-faint);
+}
+
+@media (max-width: 640px) {
+  .legal-prose ul.index {
+    columns: 1;
+  }
+}
+
 /* Sections of the Impressum page fade/rise in with a slight stagger. */
 @keyframes rise-in {
   from {

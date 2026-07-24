@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type SVGProps } from "react";
 import type { NarrationState } from "@/hooks/useLecture";
-import type { WordTiming } from "@/lib/data/deckStore";
+import type { WordTiming } from "@/lib/data/types";
 import { openApiSettings } from "@/lib/llmSettings";
 import { SlideImage } from "./SlideImage";
 import { KaraokeCaptions } from "./KaraokeCaptions";

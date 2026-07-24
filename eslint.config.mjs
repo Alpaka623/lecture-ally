@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored static assets (pdfjs worker + standard fonts) — not our source.
+    "public/**",
   ]),
 ]);
 
